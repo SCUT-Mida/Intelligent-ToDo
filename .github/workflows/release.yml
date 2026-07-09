@@ -26,8 +26,11 @@ jobs:
     name: Build Windows
     runs-on: windows-latest
     steps:
+      # fetch-depth: 0 让 git tag 注解可读（用于生成 Release 正文）
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -66,18 +69,30 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # 把 git tag 的注解（push 时 -m 写的 "Release vX.Y.Z: ..."）提取为 Release 正文。
+      # 这样 Release 页显示的是人工撰写的版本摘要，而不是光秃秃的 compare 链接。
+      - name: Compose release notes from tag annotation
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo "body<<TAG_EOF"
+            git tag -l --format='%(contents)' "${GITHUB_REF_NAME}"
+            echo "TAG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       # 仅标签触发时创建 GitHub Release
-      # generate_release_notes 会自动按提交生成更新日志
-      # 标签名含 '-'（如 v1.0.0-beta）自动标记为预发布
+      # 正文用上一步从 tag 注解提取的内容；标签名含 '-'（如 v1.0.0-beta）自动标记为预发布
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.body }}
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
           files: |
             release/*.exe
             release/latest.yml
