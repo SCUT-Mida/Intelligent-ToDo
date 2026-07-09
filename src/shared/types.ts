@@ -77,6 +77,8 @@ export interface AppData {
   priorities?: DailyPriority[]
   /** Pomodoro counter; resets daily. Optional for backward compatibility. */
   pomodoro?: PomodoroState
+  /** User-fetched holiday data, keyed by year. Overrides the bundled dataset when present. */
+  holidayOverrides?: Record<number, YearHolidayData>
 }
 
 /** A single AI-recommended priority item pointing to an existing task. */
@@ -125,6 +127,14 @@ export interface PomodoroState {
   count: number
 }
 
+/** One year of holiday data (holidays + 调休补班 days). Shared by the engine, persistence, and IPC. */
+export interface YearHolidayData {
+  /** 法定节假日: ISO date (yyyy-mm-dd) → holiday name */
+  holidays: Record<string, string>
+  /** 调休补班日: ISO date → true (a weekend shifted to a workday) */
+  adjustedWorkdays: Record<string, true>
+}
+
 export const DEFAULT_CONFIG: AppConfig = {
   apiUrl: 'https://api.openai.com/v1',
   apiKey: '',
@@ -136,7 +146,8 @@ export function createDefaultData(): AppData {
     tasks: [],
     config: { ...DEFAULT_CONFIG },
     priorities: [],
-    pomodoro: { date: '', count: 0 }
+    pomodoro: { date: '', count: 0 },
+    holidayOverrides: {}
   }
 }
 

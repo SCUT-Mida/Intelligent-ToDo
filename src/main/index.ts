@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'fs'
-import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult } from '../shared/types'
+import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolidayData } from '../shared/types'
 import { createDefaultData } from '../shared/types'
 
 const DATA_FILE = join(app.getPath('userData'), 'todo-data.json')
@@ -277,6 +277,61 @@ async function aiRecommend(tasks: Task[], config: AppConfig): Promise<AiPriority
   }
 }
 
+/**
+ * Fetch a year's official Chinese holiday + 调休补班 data from the public
+ * timor.tech API (free, no auth, HTTPS). Used by the in-app holiday updater
+ * so users don't need a new app release each year.
+ *
+ * Response semantics (verified against real 2026 data):
+ *   holiday.holiday === true  → 法定节假日 (rest day), name = holiday name
+ *   holiday.holiday === false → 调休补班 (workday)
+ */
+async function fetchHolidays(year: number): Promise<YearHolidayData> {
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new Error('年份不合法')
+  }
+  const url = `https://timor.tech/api/holiday/year/${year}`
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 20000)
+  let resp: Response
+  try {
+    resp = await fetch(url, { signal: controller.signal })
+  } catch (fetchErr) {
+    clearTimeout(timeout)
+    if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+      throw new Error('节假日接口请求超时（20 秒未响应），请检查网络后重试')
+    }
+    throw new Error(`节假日接口请求失败：${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`)
+  }
+  clearTimeout(timeout)
+
+  if (!resp.ok) {
+    throw new Error(`节假日接口返回错误 (${resp.status})，该年份可能尚未发布`)
+  }
+
+  const json = (await resp.json()) as {
+    code?: number
+    holiday?: Record<string, { holiday?: unknown; name?: unknown; date?: unknown }>
+  }
+  if (json.code !== 0 || !json.holiday) {
+    throw new Error('节假日接口返回格式异常')
+  }
+
+  const holidays: Record<string, string> = {}
+  const adjustedWorkdays: Record<string, true> = {}
+  for (const info of Object.values(json.holiday)) {
+    const iso = typeof info.date === 'string' ? info.date : undefined
+    if (!iso) continue
+    if (info.holiday === true) {
+      holidays[iso] = typeof info.name === 'string' ? info.name : '节假日'
+    } else if (info.holiday === false) {
+      adjustedWorkdays[iso] = true
+    }
+  }
+  return { holidays, adjustedWorkdays }
+}
+
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1280,
@@ -320,6 +375,7 @@ app.whenReady().then(() => {
   ipcMain.handle('ai:recommend', (_e, tasks: Task[], config: AppConfig) =>
     aiRecommend(tasks, config)
   )
+  ipcMain.handle('holidays:fetch', (_e, year: number) => fetchHolidays(year))
   ipcMain.handle(
     'md:export',
     async (_e, content: string, defaultName: string) => {
