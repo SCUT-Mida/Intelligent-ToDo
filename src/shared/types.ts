@@ -1,0 +1,141 @@
+// Shared types used by both main process and renderer
+
+/** Eisenhower matrix quadrants */
+export type Quadrant = 'q1' | 'q2' | 'q3' | 'q4'
+
+/**
+ * q1: 重要紧急 (Important + Urgent)     — Do First
+ * q2: 重要不紧急 (Important + Not Urgent) — Schedule
+ * q3: 不重要紧急 (Not Important + Urgent) — Delegate
+ * q4: 不重要不紧急 (Not Important + Not Urgent) — Eliminate / Later
+ */
+export interface QuadrantMeta {
+  id: Quadrant
+  title: string
+  subtitle: string
+  shortLabel: string
+}
+
+export const QUADRANTS: QuadrantMeta[] = [
+  {
+    id: 'q1',
+    title: '重要 且 紧急',
+    subtitle: '立即去做',
+    shortLabel: '重要·紧急'
+  },
+  {
+    id: 'q2',
+    title: '重要 不 紧急',
+    subtitle: '制定计划',
+    shortLabel: '重要·不紧急'
+  },
+  {
+    id: 'q3',
+    title: '不重要 但 紧急',
+    subtitle: '尽量委派',
+    shortLabel: '不重要·紧急'
+  },
+  {
+    id: 'q4',
+    title: '不重要 不 紧急',
+    subtitle: '稍后再说',
+    shortLabel: '不重要·不紧急'
+  }
+]
+
+export function getQuadrantMeta(id: Quadrant): QuadrantMeta {
+  return QUADRANTS.find((q) => q.id === id) ?? QUADRANTS[0]
+}
+
+/** A single todo task */
+export interface Task {
+  id: string
+  content: string
+  quadrant: Quadrant
+  /** ISO date string (yyyy-mm-dd) or null */
+  dueDate: string | null
+  completed: boolean
+  /** ISO datetime string */
+  createdAt: string
+  /** ISO datetime string */
+  updatedAt: string
+}
+
+/** AI model configuration (OpenAI-compatible) */
+export interface AppConfig {
+  /** Base URL, e.g. https://api.openai.com/v1 */
+  apiUrl: string
+  apiKey: string
+  model: string
+}
+
+/** Full persisted app data */
+export interface AppData {
+  tasks: Task[]
+  config: AppConfig
+  /** Daily AI priority snapshots. Optional for backward compatibility with old data files. */
+  priorities?: DailyPriority[]
+}
+
+/** A single AI-recommended priority item pointing to an existing task. */
+export interface PriorityItem {
+  /** Links to Task.id */
+  taskId: string
+  /** AI's reason for prioritization */
+  reason: string
+  /** Progress 0-100, stepped by 25 (0, 25, 50, 75, 100) */
+  progress: number
+  /** Mirrors completion state for this day's item */
+  completed: boolean
+  /** ISO datetime when completed, or null */
+  completedAt: string | null
+}
+
+/** A single day's AI-prioritized task list. */
+export interface DailyPriority {
+  /** yyyy-mm-dd — the day this priority applies to */
+  date: string
+  /** Ordered priority items (highest priority first) */
+  items: PriorityItem[]
+  /** One-line action advice from AI */
+  summary: string
+  /** ISO datetime — when AI generated this snapshot */
+  createdAt: string
+  /** ISO datetime — last modification time */
+  updatedAt: string
+}
+
+/** Structured result returned by the AI recommend endpoint. */
+export interface AiPriorityResult {
+  /** Ordered list of recommended priority task references */
+  items: Array<{ taskId: string; reason: string }>
+  /** One-line action advice */
+  summary: string
+  /** Original AI text, kept for debugging/fallback when JSON parse is partial */
+  raw?: string
+}
+
+export const DEFAULT_CONFIG: AppConfig = {
+  apiUrl: 'https://api.openai.com/v1',
+  apiKey: '',
+  model: 'gpt-4o-mini'
+}
+
+export function createDefaultData(): AppData {
+  return {
+    tasks: [],
+    config: { ...DEFAULT_CONFIG },
+    priorities: []
+  }
+}
+
+/** Result of loading data, so the renderer can detect/recover from read failures. */
+export interface LoadResult {
+  data: AppData
+  /** true when the file was read successfully OR didn't exist yet (first launch). */
+  ok: boolean
+  /** present only when an existing file failed to parse (corruption). */
+  error?: string
+  /** path the corrupted file was backed up to, if applicable. */
+  backupPath?: string
+}
