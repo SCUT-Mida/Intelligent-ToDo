@@ -50,7 +50,9 @@ export default function App(): JSX.Element {
           // Ensure priorities array exists for backward compatibility with old data files.
           priorities: result.data.priorities ?? [],
           // Ensure pomodoro state exists for backward compatibility.
-          pomodoro: result.data.pomodoro ?? { date: '', count: 0 }
+          pomodoro: result.data.pomodoro ?? { date: '', count: 0 },
+          // Ensure holiday overrides map exists for backward compatibility.
+          holidayOverrides: result.data.holidayOverrides ?? {}
         }
         setData(nextData)
         if (!result.ok) {
@@ -152,6 +154,16 @@ export default function App(): JSX.Element {
       console.error('export failed', e)
     }
   }, [data.tasks])
+
+  // Fetch a year's official holiday data and persist it locally so the calendar
+  // keeps working offline afterward. User does this once per year in Settings.
+  const fetchHolidays = useCallback(async (year: number): Promise<void> => {
+    const result = await window.api.fetchHolidays(year)
+    setData((prev) => ({
+      ...prev,
+      holidayOverrides: { ...(prev.holidayOverrides ?? {}), [year]: result }
+    }))
+  }, [])
 
   // ---- AI priority ops ----
   const handleAiRegenerate = useCallback(async (): Promise<void> => {
@@ -400,6 +412,7 @@ export default function App(): JSX.Element {
           tasks={data.tasks}
           onToggle={toggleTask}
           onEdit={(t) => setTaskModal({ task: t, quadrant: t.quadrant })}
+          holidayOverrides={data.holidayOverrides}
         />
       )}
 
@@ -427,6 +440,8 @@ export default function App(): JSX.Element {
           onClose={() => setConfigOpen(false)}
           onExportMarkdown={exportMd}
           taskCount={totalTasks}
+          loadedHolidayYears={Object.keys(data.holidayOverrides ?? {}).map(Number).sort((a, b) => a - b)}
+          onFetchHolidays={fetchHolidays}
         />
       )}
     </div>

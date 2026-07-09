@@ -1292,6 +1292,57 @@ select {
   line-height: 1.6;
 }
 
+/* Holiday update section */
+.holiday-years {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.holiday-years__empty {
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+.holiday-year {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: var(--text-muted);
+}
+
+.holiday-year--updated {
+  background: var(--success);
+  color: #fff;
+}
+
+.holiday-year__tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.holiday-year--updated .holiday-year__tag {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.field__hint--success {
+  color: var(--success);
+  font-weight: 500;
+}
+
+.field__hint--error {
+  color: var(--danger);
+  font-weight: 500;
+}
+
 /* ---------- Calendar view ---------- */
 .calendar-view {
   flex: 1;
@@ -1412,6 +1463,47 @@ select {
 .calendar-grid__cell--selected {
   border-color: var(--primary);
   background: var(--primary-soft);
+}
+
+/* Workday type variants — rest days are visually de-emphasized */
+.calendar-grid__cell--holiday {
+  background: var(--danger-soft);
+}
+.calendar-grid__cell--holiday .calendar-grid__day {
+  color: var(--danger);
+}
+.calendar-grid__cell--weekend {
+  background: #fafbfc;
+}
+.calendar-grid__cell--weekend .calendar-grid__day {
+  color: var(--text-faint);
+}
+/* holidays keep their tint even when also today/selected (selected wins on border) */
+.calendar-grid__cell--today.calendar-grid__cell--holiday {
+  background: var(--danger-soft);
+}
+/* workday / adjusted-workday / company-workday use the default cell surface */
+
+/* Small badge for 调休补班 / 贵司月末班 */
+.calendar-grid__daybadge {
+  font-size: 9px;
+  font-weight: 700;
+  background: var(--success);
+  color: #fff;
+  padding: 0 5px;
+  border-radius: 3px;
+  line-height: 14px;
+}
+.calendar-grid__cell--company-workday .calendar-grid__daybadge {
+  background: var(--primary);
+}
+
+/* Holiday name chip (red-tinted, prominent) */
+.cal-chip--holiday {
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 600;
 }
 
 .calendar-grid__day {
