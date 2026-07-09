@@ -18,6 +18,16 @@ interface ConfigModalProps {
 
 type FetchStatus = { kind: 'idle' } | { kind: 'loading' } | { kind: 'success'; msg: string } | { kind: 'error'; msg: string }
 
+/** Auto-update lifecycle state shown in the Settings panel. */
+type UpdateState =
+  | { stage: 'idle' }
+  | { stage: 'checking' }
+  | { stage: 'available'; version: string }
+  | { stage: 'latest' }
+  | { stage: 'downloading'; percent: number }
+  | { stage: 'downloaded' }
+  | { stage: 'error'; message: string }
+
 export default function ConfigModal({
   config,
   onSave,
@@ -36,6 +46,23 @@ export default function ConfigModal({
   const nextYear = new Date().getFullYear() + 1
   const [yearInput, setYearInput] = useState<string>(String(nextYear))
   const [fetchStatus, setFetchStatus] = useState<FetchStatus>({ kind: 'idle' })
+
+  // Auto-update: current app version + packaged flag, and live event stream.
+  const [appStatus, setAppStatus] = useState<{ version: string; isPackaged: boolean } | null>(null)
+  const [updateState, setUpdateState] = useState<UpdateState>({ stage: 'idle' })
+
+  useEffect(() => {
+    setAppStatus(window.api.getAppStatus())
+    const unsub = window.api.onUpdateEvent((e) => {
+      if (e.stage === 'checking') setUpdateState({ stage: 'checking' })
+      else if (e.stage === 'available') setUpdateState({ stage: 'available', version: e.version })
+      else if (e.stage === 'latest') setUpdateState({ stage: 'latest' })
+      else if (e.stage === 'downloading') setUpdateState({ stage: 'downloading', percent: e.percent })
+      else if (e.stage === 'downloaded') setUpdateState({ stage: 'downloaded' })
+      else if (e.stage === 'error') setUpdateState({ stage: 'error', message: e.message })
+    })
+    return unsub
+  }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -57,6 +84,18 @@ export default function ConfigModal({
     onExportMarkdown()
     setExportHint('已为你打开保存对话框')
     window.setTimeout(() => setExportHint(''), 2500)
+  }
+
+  const handleCheckUpdate = (): void => {
+    setUpdateState({ stage: 'checking' })
+    window.api.checkForUpdates().catch(() => setUpdateState({ stage: 'error', message: '检查更新失败' }))
+  }
+  const handleDownload = (): void => {
+    window.api.downloadUpdate().catch(() => setUpdateState({ stage: 'error', message: '下载失败' }))
+  }
+  const handleInstall = (): void => {
+    // quits the app and runs the installer; the app relaunches after.
+    window.api.installUpdate()
   }
 
   const handleFetchHolidays = async (): Promise<void> => {
@@ -88,6 +127,75 @@ export default function ConfigModal({
           </button>
         </div>
         <div className="modal__body">
+          <div className="settings-section-title">应用更新</div>
+
+          <div className="field">
+            <label className="field__label">版本与更新</label>
+            <div className="field__row">
+              <div className="field__row-text">
+                当前版本 <b>v{appStatus?.version ?? '…'}</b>
+              </div>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                style={{ flexShrink: 0 }}
+                onClick={handleCheckUpdate}
+                disabled={
+                  updateState.stage === 'checking' ||
+                  updateState.stage === 'downloading' ||
+                  updateState.stage === 'downloaded'
+                }
+              >
+                {updateState.stage === 'checking' ? '检查中…' : '检查更新'}
+              </button>
+            </div>
+
+            {updateState.stage === 'available' && (
+              <div className="field__row update-action">
+                <div className="field__hint field__hint--success">
+                  发现新版本 <b>v{updateState.version}</b>，是否下载并安装？
+                </div>
+                <button type="button" className="btn btn--primary" onClick={handleDownload}>
+                  下载并安装
+                </button>
+              </div>
+            )}
+
+            {updateState.stage === 'downloading' && (
+              <div className="update-progress">
+                <div className="update-progress__bar">
+                  <div className="update-progress__fill" style={{ width: `${updateState.percent}%` }} />
+                </div>
+                <div className="field__hint">正在下载更新… {updateState.percent}%</div>
+              </div>
+            )}
+
+            {updateState.stage === 'downloaded' && (
+              <div className="field__row update-action">
+                <div className="field__hint field__hint--success">更新已下载完成，点击安装将退出应用并自动替换为新版本。</div>
+                <button type="button" className="btn btn--primary" onClick={handleInstall}>
+                  退出并安装
+                </button>
+              </div>
+            )}
+
+            {updateState.stage === 'latest' && (
+              <div className="field__hint field__hint--success">✓ 已是最新版本</div>
+            )}
+
+            {updateState.stage === 'error' && (
+              <div className="field__hint field__hint--error">{updateState.message}</div>
+            )}
+
+            <div className="field__hint">
+              {appStatus?.isPackaged
+                ? '仅「安装版」支持自动更新（免安装版请手动到 Release 页下载）。新版本下载完成后点击安装将自动替换并重启。'
+                : '当前为开发/未打包模式，自动更新不可用。'}
+            </div>
+          </div>
+
+          <div className="settings-divider" />
+
           <div className="settings-section-title">AI 模型</div>
 
           <div className="field">

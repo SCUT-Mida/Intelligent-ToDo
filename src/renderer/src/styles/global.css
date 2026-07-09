@@ -1343,6 +1343,30 @@ select {
   font-weight: 500;
 }
 
+/* In-app auto-update */
+.update-action {
+  margin-top: 8px;
+  align-items: center;
+}
+
+.update-progress {
+  margin-top: 8px;
+}
+
+.update-progress__bar {
+  height: 8px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.update-progress__fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 999px;
+  transition: width 0.3s;
+}
+
 /* ---------- Calendar view ---------- */
 .calendar-view {
   flex: 1;
