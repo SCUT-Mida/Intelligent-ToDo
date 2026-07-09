@@ -42,6 +42,9 @@ win:
 
 # NSIS 安装程序选项
 nsis:
+  # 显式命名（连字符、无空格），避免默认带空格的名字在 latest.yml 引用与
+  # GitHub 上传资产名之间产生差异（曾导致自动更新 404）。
+  artifactName: ${productName}-Setup-${version}.${ext}
   oneClick: false                       # 非一键安装，给用户选择安装目录的机会
   perMachine: false                     # 按用户安装（无需管理员权限）
   allowToChangeInstallationDirectory: true
