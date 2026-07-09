@@ -133,6 +133,7 @@ export default function TodayPriorityView({
                 onRegenerate={onRegenerate}
                 onTogglePriorityItem={onTogglePriorityItem}
                 onUpdateProgress={onUpdateProgress}
+                onEditTask={onEditTask}
               />
             )}
 
@@ -181,6 +182,8 @@ interface TodayTabProps {
   onRegenerate: () => void
   onTogglePriorityItem: (taskId: string) => void
   onUpdateProgress: (taskId: string, progress: number) => void
+  /** Open the full task editor (content + quadrant + due date) for a priority item */
+  onEditTask: (task: Task) => void
 }
 
 function TodayTab({
@@ -192,7 +195,8 @@ function TodayTab({
   todayHasItems,
   onRegenerate,
   onTogglePriorityItem,
-  onUpdateProgress
+  onUpdateProgress,
+  onEditTask
 }: TodayTabProps): JSX.Element {
   if (aiState.kind === 'loading') {
     return (
@@ -282,10 +286,19 @@ function TodayTab({
             />
             <div className="priority-item__body">
               <div className="priority-item__head">
-                <div className="priority-item__content">
+                <div className={`priority-item__content ${!task ? 'priority-item__content--deleted' : ''}`}>
                   {task ? task.content : '（原任务已删除）'}
                 </div>
                 <span className="priority-item__index">#{idx + 1}</span>
+                {task && (
+                  <button
+                    className="priority-item__edit"
+                    title="编辑任务（内容 / 优先级 / 截止日期）"
+                    onClick={() => onEditTask(task)}
+                  >
+                    ✎
+                  </button>
+                )}
               </div>
               {reason && <div className="priority-item__reason">{reason}</div>}
               {!task && (
