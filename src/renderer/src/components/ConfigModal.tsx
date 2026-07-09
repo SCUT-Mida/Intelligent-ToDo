@@ -14,6 +14,8 @@ interface ConfigModalProps {
   loadedHolidayYears: number[]
   /** Fetch + persist one year's official holiday data. */
   onFetchHolidays: (year: number) => Promise<void>
+  /** Flush latest data to disk, then quit-and-install the update. */
+  onInstallUpdate: () => Promise<void>
 }
 
 type FetchStatus = { kind: 'idle' } | { kind: 'loading' } | { kind: 'success'; msg: string } | { kind: 'error'; msg: string }
@@ -35,7 +37,8 @@ export default function ConfigModal({
   onExportMarkdown,
   taskCount,
   loadedHolidayYears,
-  onFetchHolidays
+  onFetchHolidays,
+  onInstallUpdate
 }: ConfigModalProps): JSX.Element {
   const [apiUrl, setApiUrl] = useState(config.apiUrl)
   const [apiKey, setApiKey] = useState(config.apiKey)
@@ -93,9 +96,14 @@ export default function ConfigModal({
   const handleDownload = (): void => {
     window.api.downloadUpdate().catch(() => setUpdateState({ stage: 'error', message: '下载失败' }))
   }
-  const handleInstall = (): void => {
-    // quits the app and runs the installer; the app relaunches after.
-    window.api.installUpdate()
+  const handleInstall = async (): Promise<void> => {
+    // App.tsx flushes the latest data to disk, THEN quit-and-installs so the
+    // update can never cut off an in-flight save.
+    try {
+      await onInstallUpdate()
+    } catch {
+      setUpdateState({ stage: 'error', message: '安装前保存失败，请重试' })
+    }
   }
 
   const handleFetchHolidays = async (): Promise<void> => {

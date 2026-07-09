@@ -1,5 +1,6 @@
 {
   "name": "intelligent-todo",
+  "productName": "Intelligent-ToDo",
   "version": "1.0.0",
   "description": "智能化代办 - Smart Todo with Eisenhower matrix and AI prioritization",
   "main": "./out/main/index.js",

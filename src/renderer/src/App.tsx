@@ -165,6 +165,17 @@ export default function App(): JSX.Element {
     }))
   }, [])
 
+  // Flush the latest data to disk, then run the update installer. Guarantees no
+  // in-flight save is cut off by the quit-and-install.
+  const installUpdate = useCallback(async (): Promise<void> => {
+    try {
+      await window.api.saveData(data)
+    } catch (e) {
+      console.error('pre-update save failed', e)
+    }
+    window.api.installUpdate()
+  }, [data])
+
   // ---- AI priority ops ----
   const handleAiRegenerate = useCallback(async (): Promise<void> => {
     const today = todayStr()
@@ -442,6 +453,7 @@ export default function App(): JSX.Element {
           taskCount={totalTasks}
           loadedHolidayYears={Object.keys(data.holidayOverrides ?? {}).map(Number).sort((a, b) => a - b)}
           onFetchHolidays={fetchHolidays}
+          onInstallUpdate={installUpdate}
         />
       )}
     </div>
