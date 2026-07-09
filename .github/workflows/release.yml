@@ -1,0 +1,82 @@
+name: Build & Release
+
+# 触发条件：
+#   1. 推送到 master / 提交 PR  → 仅编译验证，上传 artifact（不发版）
+#   2. 推送 v* 标签              → 编译 + 打包 + 创建 GitHub Release
+#   3. 手动触发（workflow_dispatch）
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+# 创建 Release 需要 contents:write 权限
+permissions:
+  contents: write
+
+# 同一分支/标签的新构建自动取消旧的，避免重复跑
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 标签触发时，把 package.json 的 version 同步为标签名（去掉前缀 v）
+      # 这样打出来的安装包版本号与 git tag 一致，例如 v1.2.3 → 1.2.3
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: npm version --no-git-tag-version --no-commit-hooks "${GITHUB_REF_NAME#v}"
+
+      - name: Build app (electron-vite)
+        run: npm run build
+
+      # --publish never：CI 里只打包到 release/，发版交给下面的 Release 步骤统一处理
+      - name: Package Windows (electron-builder)
+        run: npx electron-builder --win --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 始终上传 artifact，方便 PR / 手动触发时下载测试构建（14 天后自动清理）
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: intelligent-todo-windows
+          path: |
+            release/*.exe
+            release/latest.yml
+          if-no-files-found: error
+          retention-days: 14
+
+      # 仅标签触发时创建 GitHub Release
+      # generate_release_notes 会自动按提交生成更新日志
+      # 标签名含 '-'（如 v1.0.0-beta）自动标记为预发布
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: |
+            release/*.exe
+            release/latest.yml

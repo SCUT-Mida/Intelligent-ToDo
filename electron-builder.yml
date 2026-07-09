@@ -1,0 +1,61 @@
+# electron-builder 打包配置
+# 文档: https://www.electron.build/configuration
+#
+# 构建产物输出到 release/ 目录，包含：
+#   - NSIS 安装包（.exe 安装程序）
+#   - 免安装版（.exe 单文件可直接运行）
+#
+# 图标说明：默认使用 Electron 内置图标。如需自定义，把 256x256+ 的 icon.ico
+# 放到 build/ 目录下，electron-builder 会自动识别 build/icon.ico。
+
+appId: com.scutmida.intelligent-todo
+productName: Intelligent-ToDo
+copyright: Copyright © 2026 SCUT-Mida
+
+# electron-vite 的编译产物在 out/，最终发布到 release/
+directories:
+  output: release
+  buildResources: build
+
+# 只打包运行时必需文件（编译后的 out/ + 清单），排除源码与文档以减小体积
+files:
+  - out/**/*
+  - package.json
+  - "!**/*.{ts,tsx,md,map}"
+  - "!**/.eslintrc*"
+  - "!**/tsconfig*.json"
+
+# 生成 asar 归档（默认开启），保护源码并减少文件碎片
+asar: true
+
+# Windows 目标
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  # 若 build/icon.ico 存在则自动使用，否则用 Electron 默认图标
+  # icon: build/icon.ico
+
+# NSIS 安装程序选项
+nsis:
+  oneClick: false                       # 非一键安装，给用户选择安装目录的机会
+  perMachine: false                     # 按用户安装（无需管理员权限）
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 智能化代办
+  uninstallDisplayName: 智能化代办
+
+# 免安装版（单 exe 直接运行，解压到临时目录）
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+
+# 发布到 GitHub Release 时生成的元数据文件名
+publish:
+  provider: github
+  owner: SCUT-Mida
+  repo: Intelligent-ToDo
