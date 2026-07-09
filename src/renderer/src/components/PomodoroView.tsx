@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import type { Task } from '@shared/types'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import type { Task, Quadrant } from '@shared/types'
+import { getQuadrantMeta } from '@shared/types'
 
 interface PomodoroViewProps {
   tasks: Task[]
@@ -19,6 +20,21 @@ function fmt(total: number): string {
   const m = Math.floor(total / 60)
   const s = total % 60
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+/** Compact due-date label + urgency state for the task picker. */
+function formatDue(due: string | null): { text: string; state: 'overdue' | 'today' | 'future' } | null {
+  if (!due) return null
+  const d = new Date()
+  const p = (n: number): string => String(n).padStart(2, '0')
+  const today = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+  const t = new Date()
+  t.setDate(t.getDate() + 1)
+  const tomorrow = `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`
+  if (due < today) return { text: '已逾期', state: 'overdue' }
+  if (due === today) return { text: '今天', state: 'today' }
+  if (due === tomorrow) return { text: '明天', state: 'future' }
+  return { text: due.slice(5), state: 'future' } // mm-dd
 }
 
 /** Play a short triple-beep using the Web Audio API (no asset needed). */
@@ -60,7 +76,16 @@ export default function PomodoroView({
   const intervalRef = useRef<number | null>(null)
 
   const incompleteTasks = tasks.filter((t) => !t.completed)
-  const focusTask = tasks.find((t) => t.id === focusTaskId) ?? null
+  // Sort picker by quadrant priority (q1→q4) then due date asc — most urgent first.
+  const sortedTasks = useMemo(() => {
+    const order: Record<Quadrant, number> = { q1: 0, q2: 1, q3: 2, q4: 3 }
+    return [...incompleteTasks].sort((a, b) => {
+      if (a.quadrant !== b.quadrant) return order[a.quadrant] - order[b.quadrant]
+      if (!a.dueDate) return 1
+      if (!b.dueDate) return -1
+      return a.dueDate.localeCompare(b.dueDate)
+    })
+  }, [tasks])
 
   // Tick down every second while running
   useEffect(() => {
@@ -190,24 +215,40 @@ export default function PomodoroView({
         </div>
 
         <div className="pomodoro-focus">
-          <label className="pomodoro-focus__label">专注任务（可选）</label>
-          <select
-            className="select pomodoro-focus__select"
-            value={focusTaskId}
-            onChange={(e) => setFocusTaskId(e.target.value)}
-          >
-            <option value="">— 不绑定任务 —</option>
-            {incompleteTasks.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.content}
-              </option>
-            ))}
-          </select>
-          {focusTask && (
-            <div className="pomodoro-focus__current">
-              正在专注：<b>{focusTask.content}</b>
-            </div>
-          )}
+          <label className="pomodoro-focus__label">专注任务（可选，按优先级排序）</label>
+          <div className="pomo-picker">
+            <button
+              type="button"
+              className={`pomo-task ${focusTaskId === '' ? 'pomo-task--active' : ''}`}
+              onClick={() => setFocusTaskId('')}
+            >
+              <span className="pomo-task__content pomo-task__content--muted">不绑定任务，纯计时</span>
+            </button>
+            {sortedTasks.length === 0 ? (
+              <div className="pomo-task__empty">暂无待办任务，去「任务看板」添加吧</div>
+            ) : (
+              sortedTasks.map((t) => {
+                const due = formatDue(t.dueDate)
+                const meta = getQuadrantMeta(t.quadrant)
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={`pomo-task ${focusTaskId === t.id ? 'pomo-task--active' : ''}`}
+                    onClick={() => setFocusTaskId(t.id)}
+                    title={meta.title}
+                  >
+                    <span className={`pomo-task__dot pomo-task__dot--${t.quadrant}`} />
+                    <span className={`pomo-task__tag pomo-task__tag--${t.quadrant}`}>{meta.shortLabel}</span>
+                    <span className="pomo-task__content">{t.content}</span>
+                    {due && (
+                      <span className={`pomo-task__due pomo-task__due--${due.state}`}>{due.text}</span>
+                    )}
+                  </button>
+                )
+              })
+            )}
+          </div>
         </div>
 
         <div className="pomodoro-stats">
