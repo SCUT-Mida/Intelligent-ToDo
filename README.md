@@ -2,6 +2,10 @@
 
 > 基于艾森豪威尔矩阵（四象限法则）+ AI 智能优先排序的桌面待办应用，让你的每一天都聚焦在最重要的事情上。
 
+[![Build & Release](https://github.com/SCUT-Mida/Intelligent-ToDo/actions/workflows/release.yml/badge.svg)](https://github.com/SCUT-Mida/Intelligent-ToDo/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)](#📥-下载安装)
+
 一个使用 Electron + React + TypeScript 构建的跨平台桌面应用。它不只是又一个待办清单——它把「四象限法则」和「AI 智能分析」结合起来，每天帮你回答那个最难的问题：**今天到底该先做什么？**
 
 ---
@@ -44,6 +48,21 @@
 
 ### 5. Markdown 导出
 一键把全部任务按四象限分组导出为 `.md` 文件，方便归档或分享。
+
+---
+
+## 📥 下载安装
+
+### 方式一：直接下载（推荐）
+前往 [Releases 页面](https://github.com/SCUT-Mida/Intelligent-ToDo/releases/latest) 下载最新版本：
+
+- **`Intelligent-ToDo-Setup-x.y.z.exe`** — NSIS 安装程序，双击安装，自动创建桌面与开始菜单快捷方式
+- **`Intelligent-ToDo-x.y.z-portable.exe`** — 免安装版，单文件直接双击运行，无需安装
+
+> 每次 `git push` 打 `v*` 标签时，GitHub Actions 会自动编译 Windows 版本并发布到 Release。
+
+### 方式二：自行编译
+见下方「快速开始」。运行 `npm run build:win` 即可在本地生成与 Release 相同的安装包。
 
 ---
 
