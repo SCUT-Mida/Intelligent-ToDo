@@ -125,21 +125,34 @@ export default function CalendarView({ tasks, onToggle, onEdit }: CalendarViewPr
           {grid.map((cell, i) => {
             if (!cell) return <div key={`blank-${i}`} className="calendar-grid__cell calendar-grid__cell--blank" />
             const cellTasks = tasksByDate.get(cell.dateStr) ?? []
-            const incompleteCount = cellTasks.filter((t) => !t.completed).length
+            const visible = cellTasks.slice(0, 2)
+            const overflow = cellTasks.length - visible.length
             const isToday = cell.dateStr === todayStr()
             const isSelected = cell.dateStr === selectedDate
             return (
               <button
                 key={cell.dateStr}
-                className={`calendar-grid__cell ${isToday ? 'calendar-grid__cell--today' : ''} ${isSelected ? 'calendar-grid__cell--selected' : ''}`}
+                className={`calendar-grid__cell ${isToday ? 'calendar-grid__cell--today' : ''} ${isSelected ? 'calendar-grid__cell--selected' : ''} ${cellTasks.length > 0 ? 'calendar-grid__cell--has' : ''}`}
                 onClick={() => setSelectedDate(cell.dateStr)}
               >
-                <span className="calendar-grid__day">{cell.day}</span>
-                {cellTasks.length > 0 && (
-                  <span className="calendar-grid__badge">
-                    {incompleteCount > 0 ? incompleteCount : '✓'}
-                  </span>
-                )}
+                <span className="calendar-grid__day">
+                  {cell.day}
+                  {cellTasks.length > 0 && (
+                    <span className="calendar-grid__daycount">{cellTasks.length}</span>
+                  )}
+                </span>
+                <div className="calendar-grid__chips">
+                  {visible.map((t) => (
+                    <span
+                      key={t.id}
+                      className={`cal-chip cal-chip--${t.quadrant} ${t.completed ? 'cal-chip--done' : ''}`}
+                      title={t.content}
+                    >
+                      {t.content}
+                    </span>
+                  ))}
+                  {overflow > 0 && <span className="cal-chip cal-chip--more">+{overflow}</span>}
+                </div>
               </button>
             )
           })}
