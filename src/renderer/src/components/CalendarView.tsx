@@ -1,11 +1,14 @@
 import { useState, useMemo } from 'react'
-import type { Task, Quadrant } from '@shared/types'
+import type { Task, Quadrant, YearHolidayData } from '@shared/types'
 import { QUADRANTS } from '@shared/types'
+import { getDayInfo } from '../lib/workday'
 
 interface CalendarViewProps {
   tasks: Task[]
   onToggle: (id: string) => void
   onEdit: (task: Task) => void
+  /** User-fetched holiday overrides (take precedence over bundled data). */
+  holidayOverrides?: Record<number, YearHolidayData>
 }
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
@@ -34,7 +37,7 @@ function buildMonthGrid(year: number, month: number): Array<{ dateStr: string; d
   return cells
 }
 
-export default function CalendarView({ tasks, onToggle, onEdit }: CalendarViewProps): JSX.Element {
+export default function CalendarView({ tasks, onToggle, onEdit, holidayOverrides }: CalendarViewProps): JSX.Element {
   const now = new Date()
   const [viewYear, setViewYear] = useState(now.getFullYear())
   const [viewMonth, setViewMonth] = useState(now.getMonth()) // 0-11
@@ -67,8 +70,15 @@ export default function CalendarView({ tasks, onToggle, onEdit }: CalendarViewPr
       done: tasks.filter((t) => t.quadrant === q.id && t.completed).length
     }))
     const maxQuad = Math.max(1, ...byQuadrant.map((q) => q.total))
-    return { total, done, incomplete, rate, overdue, byQuadrant, maxQuad }
-  }, [tasks])
+    // Workdays in the currently-viewed month (for planning). Accounts for
+    // holidays + 调休补班 + the company last-Saturday rule.
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
+    let monthWorkdays = 0
+    for (let d = 1; d <= daysInMonth; d++) {
+      if (getDayInfo(new Date(viewYear, viewMonth, d), holidayOverrides).isWorkday) monthWorkdays++
+    }
+    return { total, done, incomplete, rate, overdue, byQuadrant, maxQuad, monthWorkdays }
+  }, [tasks, viewYear, viewMonth, holidayOverrides])
 
   const todayTasks = tasksByDate.get(todayStr()) ?? []
   const selectedTasks = tasksByDate.get(selectedDate) ?? []
@@ -129,19 +139,29 @@ export default function CalendarView({ tasks, onToggle, onEdit }: CalendarViewPr
             const overflow = cellTasks.length - visible.length
             const isToday = cell.dateStr === todayStr()
             const isSelected = cell.dateStr === selectedDate
+            // Workday / holiday info for this cell
+            const [yy, mm, dd] = cell.dateStr.split('-').map(Number)
+            const info = getDayInfo(new Date(yy, mm - 1, dd), holidayOverrides)
+            const showBadge = info.type === 'adjusted-workday' || info.type === 'company-workday'
             return (
               <button
                 key={cell.dateStr}
-                className={`calendar-grid__cell ${isToday ? 'calendar-grid__cell--today' : ''} ${isSelected ? 'calendar-grid__cell--selected' : ''} ${cellTasks.length > 0 ? 'calendar-grid__cell--has' : ''}`}
+                className={`calendar-grid__cell calendar-grid__cell--${info.type} ${isToday ? 'calendar-grid__cell--today' : ''} ${isSelected ? 'calendar-grid__cell--selected' : ''} ${cellTasks.length > 0 ? 'calendar-grid__cell--has' : ''}`}
                 onClick={() => setSelectedDate(cell.dateStr)}
               >
                 <span className="calendar-grid__day">
                   {cell.day}
+                  {showBadge && <span className="calendar-grid__daybadge">{info.label}</span>}
                   {cellTasks.length > 0 && (
                     <span className="calendar-grid__daycount">{cellTasks.length}</span>
                   )}
                 </span>
                 <div className="calendar-grid__chips">
+                  {info.type === 'holiday' && (
+                    <span className="cal-chip cal-chip--holiday" title={`${info.label}（法定节假日）`}>
+                      {info.label}
+                    </span>
+                  )}
                   {visible.map((t) => (
                     <span
                       key={t.id}
@@ -245,6 +265,16 @@ export default function CalendarView({ tasks, onToggle, onEdit }: CalendarViewPr
                   </span>
                 </div>
               ))}
+            </div>
+          </div>
+
+          <div className="stats-block">
+            <div className="stats-block__head">
+              <span>本月工作日</span>
+              <span className="stats-block__pct">{stats.monthWorkdays} 天</span>
+            </div>
+            <div className="field__hint" style={{ marginTop: 2 }}>
+              已扣除周末与法定节假日，含调休补班与月末最后一个周六（贵司规则）
             </div>
           </div>
 
