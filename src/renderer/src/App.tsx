@@ -5,9 +5,11 @@ import TaskModal from './components/TaskModal'
 import ConfigModal from './components/ConfigModal'
 import QuadrantBoard from './components/QuadrantBoard'
 import TodayPriorityView from './components/TodayPriorityView'
+import CalendarView from './components/CalendarView'
+import PomodoroView from './components/PomodoroView'
 import { generateMarkdown, defaultMdFileName } from './lib/markdown'
 
-type View = 'board' | 'priority'
+type View = 'board' | 'priority' | 'calendar' | 'pomodoro'
 
 type AiState =
   | { kind: 'idle' }
@@ -46,7 +48,9 @@ export default function App(): JSX.Element {
         const nextData: AppData = {
           ...result.data,
           // Ensure priorities array exists for backward compatibility with old data files.
-          priorities: result.data.priorities ?? []
+          priorities: result.data.priorities ?? [],
+          // Ensure pomodoro state exists for backward compatibility.
+          pomodoro: result.data.pomodoro ?? { date: '', count: 0 }
         }
         setData(nextData)
         if (!result.ok) {
@@ -258,6 +262,19 @@ export default function App(): JSX.Element {
     })
   }, [])
 
+  // ---- pomodoro ----
+  // Increment today's completed-work-session count, rolling over on a new day.
+  const handleCompleteWorkSession = useCallback((): void => {
+    const today = todayStr()
+    setData((prev) => {
+      const cur = prev.pomodoro
+      if (!cur || cur.date !== today) {
+        return { ...prev, pomodoro: { date: today, count: 1 } }
+      }
+      return { ...prev, pomodoro: { date: today, count: cur.count + 1 } }
+    })
+  }, [])
+
   // ---- derived ----
   const today = todayStr()
   const todayPriority = (data.priorities ?? []).find((p) => p.date === today) ?? null
@@ -268,6 +285,8 @@ export default function App(): JSX.Element {
   const totalTasks = data.tasks.length
   const doneTasks = data.tasks.filter((t) => t.completed).length
   const pendingTasks = totalTasks - doneTasks
+  const pomodoroTodayCount =
+    data.pomodoro && data.pomodoro.date === today ? data.pomodoro.count : 0
 
   if (!loaded) {
     return (
@@ -307,15 +326,24 @@ export default function App(): JSX.Element {
           >
             今日优先
           </button>
+          <button
+            className={`toolbar__tab ${view === 'calendar' ? 'toolbar__tab--active' : ''}`}
+            onClick={() => setView('calendar')}
+          >
+            日历总览
+          </button>
+          <button
+            className={`toolbar__tab ${view === 'pomodoro' ? 'toolbar__tab--active' : ''}`}
+            onClick={() => setView('pomodoro')}
+          >
+            番茄钟
+          </button>
         </div>
         <button
           className="btn btn--primary"
           onClick={() => setTaskModal({ task: null, quadrant: 'q1' })}
         >
           + 新建任务
-        </button>
-        <button className="btn btn--ghost" onClick={exportMd}>
-          导出 Markdown
         </button>
         <div className="toolbar__spacer" />
         <div className="toolbar__stats">
@@ -332,15 +360,15 @@ export default function App(): JSX.Element {
         <button
           className="btn btn--icon"
           onClick={() => setConfigOpen(true)}
-          title="AI 配置"
-          aria-label="配置"
+          title="设置"
+          aria-label="设置"
         >
           ⚙
         </button>
       </header>
 
-      {/* Main content — switches between board and priority view */}
-      {view === 'board' ? (
+      {/* Main content — switches between views */}
+      {view === 'board' && (
         <QuadrantBoard
           tasks={data.tasks}
           onToggle={toggleTask}
@@ -348,7 +376,9 @@ export default function App(): JSX.Element {
           onDelete={deleteTask}
           onAddTask={(q) => setTaskModal({ task: null, quadrant: q })}
         />
-      ) : (
+      )}
+
+      {view === 'priority' && (
         <TodayPriorityView
           tasks={data.tasks}
           todayPriority={todayPriority}
@@ -365,6 +395,22 @@ export default function App(): JSX.Element {
         />
       )}
 
+      {view === 'calendar' && (
+        <CalendarView
+          tasks={data.tasks}
+          onToggle={toggleTask}
+          onEdit={(t) => setTaskModal({ task: t, quadrant: t.quadrant })}
+        />
+      )}
+
+      {view === 'pomodoro' && (
+        <PomodoroView
+          tasks={data.tasks}
+          todayCount={pomodoroTodayCount}
+          onCompleteWorkSession={handleCompleteWorkSession}
+        />
+      )}
+
       {/* Modals */}
       {taskModal && (
         <TaskModal
@@ -375,7 +421,13 @@ export default function App(): JSX.Element {
         />
       )}
       {configOpen && (
-        <ConfigModal config={data.config} onSave={saveConfig} onClose={() => setConfigOpen(false)} />
+        <ConfigModal
+          config={data.config}
+          onSave={saveConfig}
+          onClose={() => setConfigOpen(false)}
+          onExportMarkdown={exportMd}
+          taskCount={totalTasks}
+        />
       )}
     </div>
   )
