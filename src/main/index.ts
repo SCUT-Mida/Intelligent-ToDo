@@ -53,6 +53,12 @@ function loadData(): LoadResult {
     return {
       ok: true,
       data: {
+        // Spread parsed FIRST so optional fields (priorities, pomodoro,
+        // holidayOverrides, and any future ones) round-trip to disk. Earlier
+        // this reconstructed only {tasks, config}, which silently dropped the
+        // AI priority snapshots, pomodoro count, and holiday overrides on every
+        // restart — analyses "disappeared" even though they were saved.
+        ...parsed,
         tasks: Array.isArray(parsed.tasks) ? (parsed.tasks as Task[]) : defaults.tasks,
         config
       }
