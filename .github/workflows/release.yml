@@ -40,10 +40,11 @@ jobs:
 
       # 标签触发时，把 package.json 的 version 同步为标签名（去掉前缀 v）
       # 这样打出来的安装包版本号与 git tag 一致，例如 v1.2.3 → 1.2.3
+      # --allow-same-version：当 package.json 版本已与标签一致时不报错（幂等）
       - name: Set version from tag
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
-        run: npm version --no-git-tag-version --no-commit-hooks "${GITHUB_REF_NAME#v}"
+        run: npm version --no-git-tag-version --no-commit-hooks --allow-same-version "${GITHUB_REF_NAME#v}"
 
       - name: Build app (electron-vite)
         run: npm run build
