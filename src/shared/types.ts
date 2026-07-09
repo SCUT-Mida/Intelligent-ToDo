@@ -75,6 +75,8 @@ export interface AppData {
   config: AppConfig
   /** Daily AI priority snapshots. Optional for backward compatibility with old data files. */
   priorities?: DailyPriority[]
+  /** Pomodoro counter; resets daily. Optional for backward compatibility. */
+  pomodoro?: PomodoroState
 }
 
 /** A single AI-recommended priority item pointing to an existing task. */
@@ -115,6 +117,14 @@ export interface AiPriorityResult {
   raw?: string
 }
 
+/** Pomodoro daily counter. Rolls over to 1 on a new day. */
+export interface PomodoroState {
+  /** yyyy-mm-dd — the day this count applies to */
+  date: string
+  /** Number of completed work sessions today */
+  count: number
+}
+
 export const DEFAULT_CONFIG: AppConfig = {
   apiUrl: 'https://api.openai.com/v1',
   apiKey: '',
@@ -125,7 +135,8 @@ export function createDefaultData(): AppData {
   return {
     tasks: [],
     config: { ...DEFAULT_CONFIG },
-    priorities: []
+    priorities: [],
+    pomodoro: { date: '', count: 0 }
   }
 }
 
