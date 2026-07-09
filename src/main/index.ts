@@ -278,50 +278,33 @@ async function aiRecommend(tasks: Task[], config: AppConfig): Promise<AiPriority
   }
 }
 
-/**
- * Fetch a year's official Chinese holiday + 调休补班 data from the public
- * timor.tech API (free, no auth, HTTPS). Used by the in-app holiday updater
- * so users don't need a new app release each year.
- *
- * Response semantics (verified against real 2026 data):
- *   holiday.holiday === true  → 法定节假日 (rest day), name = holiday name
- *   holiday.holiday === false → 调休补班 (workday)
- */
-async function fetchHolidays(year: number): Promise<YearHolidayData> {
-  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
-    throw new Error('年份不合法')
-  }
-  const url = `https://timor.tech/api/holiday/year/${year}`
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 20000)
-  let resp: Response
-  try {
-    resp = await fetch(url, { signal: controller.signal })
-  } catch (fetchErr) {
-    clearTimeout(timeout)
-    if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
-      throw new Error('节假日接口请求超时（20 秒未响应），请检查网络后重试')
+/** Parse the NateScarlet/holiday-cn dataset (served via jsdelivr CDN). */
+function parseNateScarlet(json: unknown): YearHolidayData {
+  const data = json as { days?: Array<{ name?: unknown; date?: unknown; isOffDay?: unknown }> }
+  if (!data || !Array.isArray(data.days)) throw new Error('数据格式异常')
+  const holidays: Record<string, string> = {}
+  const adjustedWorkdays: Record<string, true> = {}
+  for (const d of data.days) {
+    if (typeof d.date !== 'string') continue
+    if (d.isOffDay === true) {
+      holidays[d.date] = typeof d.name === 'string' ? d.name : '节假日'
+    } else if (d.isOffDay === false) {
+      adjustedWorkdays[d.date] = true
     }
-    throw new Error(`节假日接口请求失败：${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`)
   }
-  clearTimeout(timeout)
+  return { holidays, adjustedWorkdays }
+}
 
-  if (!resp.ok) {
-    throw new Error(`节假日接口返回错误 (${resp.status})，该年份可能尚未发布`)
-  }
-
-  const json = (await resp.json()) as {
+/** Parse the timor.tech year response. */
+function parseTimor(json: unknown): YearHolidayData {
+  const data = json as {
     code?: number
     holiday?: Record<string, { holiday?: unknown; name?: unknown; date?: unknown }>
   }
-  if (json.code !== 0 || !json.holiday) {
-    throw new Error('节假日接口返回格式异常')
-  }
-
+  if (data.code !== 0 || !data.holiday) throw new Error('数据格式异常')
   const holidays: Record<string, string> = {}
   const adjustedWorkdays: Record<string, true> = {}
-  for (const info of Object.values(json.holiday)) {
+  for (const info of Object.values(data.holiday)) {
     const iso = typeof info.date === 'string' ? info.date : undefined
     if (!iso) continue
     if (info.holiday === true) {
@@ -331,6 +314,92 @@ async function fetchHolidays(year: number): Promise<YearHolidayData> {
     }
   }
   return { holidays, adjustedWorkdays }
+}
+
+interface HolidaySource {
+  name: string
+  url: string
+  parse: (json: unknown) => YearHolidayData
+}
+
+/**
+ * Fetch a year's official Chinese holiday + 调休补班 data.
+ *
+ * Tries multiple sources in order so a single flaky/blocked endpoint doesn't
+ * break the in-app updater (timor.tech alone proved unreachable on some user
+ * networks). Primary is the jsdelivr CDN mirror of NateScarlet/holiday-cn —
+ * CDN-backed, reliable in China; timor.tech is the fallback.
+ *
+ * Returns the first source that succeeds; collects per-source errors so the
+ * final failure message explains what was tried.
+ */
+async function fetchHolidays(year: number): Promise<YearHolidayData> {
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new Error('年份不合法')
+  }
+
+  const sources: HolidaySource[] = [
+    {
+      name: 'jsdelivr CDN',
+      url: `https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/${year}.json`,
+      parse: parseNateScarlet
+    },
+    {
+      name: 'timor.tech',
+      url: `https://timor.tech/api/holiday/year/${year}`,
+      parse: parseTimor
+    },
+    {
+      name: 'jsdelivr Fastly 镜像',
+      url: `https://fastly.jsdelivr.net/gh/NateScarlet/holiday-cn@master/${year}.json`,
+      parse: parseNateScarlet
+    }
+  ]
+
+  const errors: string[] = []
+  for (const src of sources) {
+    try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 12000)
+      let resp: Response
+      try {
+        resp = await fetch(src.url, { signal: controller.signal })
+      } catch (fetchErr) {
+        const isAbort = fetchErr instanceof Error && fetchErr.name === 'AbortError'
+        errors.push(`${src.name}：${isAbort ? '请求超时' : '无法访问'}`)
+        continue
+      } finally {
+        clearTimeout(timeout)
+      }
+      if (resp.status === 404) {
+        errors.push(`${src.name}：该年份尚未发布`)
+        continue
+      }
+      if (!resp.ok) {
+        errors.push(`${src.name}：HTTP ${resp.status}`)
+        continue
+      }
+      const json = await resp.json()
+      const parsed = src.parse(json)
+      // A valid-but-empty dataset means the year exists in the repo but hasn't
+      // been announced yet (e.g. 2027 before the State Council publishes).
+      // Treat as "not published" and try the next source rather than saving
+      // an empty holiday year that would erase all holidays.
+      if (
+        Object.keys(parsed.holidays).length === 0 &&
+        Object.keys(parsed.adjustedWorkdays).length === 0
+      ) {
+        errors.push(`${src.name}：该年份尚未发布`)
+        continue
+      }
+      return parsed
+    } catch (e) {
+      errors.push(`${src.name}：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  throw new Error(
+    `所有节假日数据源均失败，可能是网络问题或该年份尚未发布。已尝试：\n${errors.join('；\n')}`
+  )
 }
 
 function createWindow(): BrowserWindow {
