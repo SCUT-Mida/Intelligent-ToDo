@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'fs'
+import { autoUpdater } from 'electron-updater'
 import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolidayData } from '../shared/types'
 import { createDefaultData } from '../shared/types'
 
@@ -332,7 +333,7 @@ async function fetchHolidays(year: number): Promise<YearHolidayData> {
   return { holidays, adjustedWorkdays }
 }
 
-function createWindow(): void {
+function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -364,6 +365,8 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  return mainWindow
 }
 
 app.whenReady().then(() => {
@@ -393,6 +396,47 @@ app.whenReady().then(() => {
   )
 
   createWindow()
+
+  // ---- auto-update (electron-updater) ----
+  // Don't auto-download; let the user confirm in Settings. Update events are
+  // forwarded to the renderer so the Settings panel can show live status.
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = true
+  const updaterWindow = BrowserWindow.getAllWindows()[0]
+  const send = (payload: unknown): void => {
+    if (updaterWindow && !updaterWindow.isDestroyed()) {
+      updaterWindow.webContents.send('update:event', payload)
+    }
+  }
+  autoUpdater.on('checking-for-update', () => send({ stage: 'checking' }))
+  autoUpdater.on('update-available', (info) => send({ stage: 'available', version: info.version }))
+  autoUpdater.on('update-not-available', () => send({ stage: 'latest' }))
+  autoUpdater.on('download-progress', (p) => send({ stage: 'downloading', percent: Math.round(p.percent) }))
+  autoUpdater.on('update-downloaded', () => send({ stage: 'downloaded' }))
+  autoUpdater.on('error', (err) => send({ stage: 'error', message: err?.message ?? String(err) }))
+
+  // Current version + packaged flag, for the Settings panel.
+  ipcMain.on('app:status', (e) => {
+    e.returnValue = { version: app.getVersion(), isPackaged: app.isPackaged }
+  })
+  ipcMain.handle('update:check', () => {
+    if (!app.isPackaged) {
+      send({ stage: 'error', message: '当前为开发/未打包模式，自动更新不可用。请使用安装版体验。' })
+      return false
+    }
+    autoUpdater.checkForUpdates().catch((err) => send({ stage: 'error', message: err?.message ?? String(err) }))
+    return true
+  })
+  ipcMain.handle('update:download', () => {
+    autoUpdater.downloadUpdate().catch((err) => send({ stage: 'error', message: err?.message ?? String(err) }))
+    return true
+  })
+  ipcMain.handle('update:install', () => {
+    // quitAndInstall closes the app and runs the downloaded NSIS installer,
+    // which silently replaces the installed version, then relaunches.
+    autoUpdater.quitAndInstall()
+    return true
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
