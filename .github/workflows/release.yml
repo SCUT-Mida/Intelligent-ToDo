@@ -71,11 +71,14 @@ jobs:
 
       # 把 git tag 的注解（push 时 -m 写的 "Release vX.Y.Z: ..."）提取为 Release 正文。
       # 这样 Release 页显示的是人工撰写的版本摘要，而不是光秃秃的 compare 链接。
+      # 注意：actions/checkout 可能只取 tag 引用而不带 annotated tag 对象，
+      # 需先 force-fetch 该 tag，%(contents) 才能读到注解而非提交信息。
       - name: Compose release notes from tag annotation
         if: startsWith(github.ref, 'refs/tags/v')
         id: notes
         shell: bash
         run: |
+          git fetch --tags --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" 2>/dev/null || git fetch --tags --force
           {
             echo "body<<TAG_EOF"
             git tag -l --format='%(contents)' "${GITHUB_REF_NAME}"
