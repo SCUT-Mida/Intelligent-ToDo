@@ -1,4 +1,4 @@
-// 工作日 / 休息日判定引擎
+// 工作日 / 休息日判定引擎（主进程与渲染进程共享）
 //
 // 优先级（高 → 低）：
 //   1. 调休补班（国务院调休，周末改工作日） → 工作日，标「补班」
@@ -10,14 +10,25 @@
 // 数据来源：内置 HOLIDAY_DATA（随包发布）+ 运行时 overrides（用户在设置里拉的权威数据）。
 // overrides 优先：用户拉取某年后，该年以 overrides 为准（即使与内置冲突）。
 // 数据维护：每年 11 月国务院发布次年安排后，用户在「设置 → 节假日数据」拉取即可，无需换版本。
-// 数据来源参考：国务院办公厅通知；接口 timor.tech/api/holiday/year/{year}
 
-import type { YearHolidayData } from '@shared/types'
+import type { YearHolidayData } from './types'
 
 /** Date → yyyy-mm-dd（本地时区）。 */
 export function dateISO(d: Date): string {
   const p = (n: number): string => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+/** 展开连续日期区间为 ISO 字符串数组（闭区间）。 */
+function expandRange(startISO: string, endISO: string): string[] {
+  const out: string[] = []
+  const d = new Date(startISO + 'T00:00:00')
+  const end = new Date(endISO + 'T00:00:00')
+  while (d <= end) {
+    out.push(dateISO(d))
+    d.setDate(d.getDate() + 1)
+  }
+  return out
 }
 
 /** 由区间规格构建年份数据，避免手写每个日期出错。 */
@@ -36,18 +47,6 @@ function buildYearData(
     adjustedWorkdays[iso] = true
   }
   return { holidays, adjustedWorkdays }
-}
-
-/** 展开连续日期区间为 ISO 字符串数组（闭区间）。 */
-function expandRange(startISO: string, endISO: string): string[] {
-  const out: string[] = []
-  const d = new Date(startISO + 'T00:00:00')
-  const end = new Date(endISO + 'T00:00:00')
-  while (d <= end) {
-    out.push(dateISO(d))
-    d.setDate(d.getDate() + 1)
-  }
-  return out
 }
 
 // 内置官方放假安排（兜底；用户在设置里拉取的 overrides 优先）。
@@ -126,3 +125,23 @@ export function getDayInfo(date: Date, overrides?: Record<number, YearHolidayDat
   // 5. 普通工作日
   return { type: 'workday', isWorkday: true }
 }
+
+/** 把工作日属性转成自然语言描述（供 AI prompt 和界面提示使用）。 */
+export function describeDay(info: DayInfo): string {
+  switch (info.type) {
+    case 'holiday':
+      return `法定节假日${info.label ? '（' + info.label + '）' : ''}`
+    case 'adjusted-workday':
+      return '调休补班日（周末调休为工作日）'
+    case 'company-workday':
+      return '工作日（贵司月末最后一个周六）'
+    case 'weekend':
+      return '周末（休息日）'
+    case 'workday':
+    default:
+      return '工作日'
+  }
+}
+
+/** 中文星期几。 */
+export const WEEKDAYS_ZH = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']

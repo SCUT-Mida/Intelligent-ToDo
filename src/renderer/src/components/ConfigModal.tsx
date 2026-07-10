@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { AppConfig } from '@shared/types'
-import { BUNDLED_HOLIDAY_YEARS } from '../lib/workday'
+import { BUNDLED_HOLIDAY_YEARS } from '@shared/workday'
 
 interface ConfigModalProps {
   config: AppConfig

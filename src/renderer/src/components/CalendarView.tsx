@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { Task, Quadrant, YearHolidayData } from '@shared/types'
 import { QUADRANTS } from '@shared/types'
-import { getDayInfo } from '../lib/workday'
+import { getDayInfo } from '@shared/workday'
 
 interface CalendarViewProps {
   tasks: Task[]
