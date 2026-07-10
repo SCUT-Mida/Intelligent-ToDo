@@ -381,6 +381,19 @@ select {
   font-weight: 600;
 }
 
+/* Progress indicator on board task cards (right side of meta line) */
+.task__progress {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.task__progress--done {
+  color: var(--success);
+}
+
 .task__actions {
   display: flex;
   gap: 2px;
@@ -736,9 +749,8 @@ select {
 }
 
 .priority-view__right {
-  width: 400px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--border);
+  flex: 1;
+  min-width: 0;
   background: var(--surface);
   display: flex;
   flex-direction: column;
@@ -1243,26 +1255,6 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- Priority view collapse + header row ---------- */
-.priority-view--collapsed .priority-view__right {
-  width: auto;
-  flex: 1;
-  border-left: none;
-}
-
-.priority-panel__headrow {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.priority-panel__toggle {
-  flex-shrink: 0;
-  padding: 6px 12px;
-  font-size: 12px;
-}
-
 /* ---------- Settings modal sections ---------- */
 .settings-section-title {
   font-size: 12px;
@@ -1489,26 +1481,31 @@ select {
   background: var(--primary-soft);
 }
 
-/* Workday type variants — rest days are visually de-emphasized */
+/* Workday type variants — rest days use teal-green, company days use orange */
 .calendar-grid__cell--holiday {
-  background: var(--danger-soft);
+  background: #f0fdfa;
 }
 .calendar-grid__cell--holiday .calendar-grid__day {
-  color: var(--danger);
+  color: #0d9488;
 }
 .calendar-grid__cell--weekend {
-  background: #fafbfc;
+  background: #f0fdfa;
 }
 .calendar-grid__cell--weekend .calendar-grid__day {
-  color: var(--text-faint);
+  color: #0d9488;
 }
-/* holidays keep their tint even when also today/selected (selected wins on border) */
-.calendar-grid__cell--today.calendar-grid__cell--holiday {
-  background: var(--danger-soft);
+/* rest-day tint persists even when also today/selected */
+.calendar-grid__cell--today.calendar-grid__cell--holiday,
+.calendar-grid__cell--today.calendar-grid__cell--weekend {
+  background: #f0fdfa;
 }
-/* workday / adjusted-workday / company-workday use the default cell surface */
+/* Company workday (月末周六): orange background */
+.calendar-grid__cell--company-workday {
+  background: var(--q3-bg);
+}
+/* adjusted-workday uses the default cell surface */
 
-/* Small badge for 调休补班 / 贵司月末班 */
+/* Small badge for 调休补班 / 月末周六 */
 .calendar-grid__daybadge {
   font-size: 9px;
   font-weight: 700;
@@ -1517,16 +1514,18 @@ select {
   padding: 0 5px;
   border-radius: 3px;
   line-height: 14px;
+  white-space: nowrap;
 }
 .calendar-grid__cell--company-workday .calendar-grid__daybadge {
-  background: var(--primary);
+  background: var(--q3-color);
+  padding: 0 4px;
 }
 
-/* Holiday name chip (red-tinted, prominent) */
-.cal-chip--holiday {
-  border-left-color: var(--danger);
-  background: var(--danger-soft);
-  color: var(--danger);
+/* Rest-day chip (teal-green, for holiday names + 休息日) */
+.cal-chip--rest {
+  border-left-color: #14b8a6;
+  background: #ccfbf1;
+  color: #0d9488;
   font-weight: 600;
 }
 

@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import type { Task, Quadrant, DailyPriority } from '@shared/types'
+import type { Task, DailyPriority } from '@shared/types'
 import { getQuadrantMeta } from '@shared/types'
-import QuadrantBoard from './QuadrantBoard'
 import ProgressSteps from './ProgressSteps'
 
 type AiState =
@@ -26,11 +25,8 @@ interface TodayPriorityViewProps {
   onTogglePriorityItem: (taskId: string) => void
   /** Update a priority item's progress (0-100) */
   onUpdateProgress: (taskId: string, progress: number) => void
-  /** Board handlers (forwarded to compact QuadrantBoard) */
-  onToggleTask: (id: string) => void
+  /** Open the task editor for a priority item */
   onEditTask: (task: Task) => void
-  onDeleteTask: (id: string) => void
-  onAddTask: (quadrant: Quadrant) => void
 }
 
 /** Format a yyyy-mm-dd string as "7月9日 周三". */
@@ -55,53 +51,23 @@ export default function TodayPriorityView({
   onRegenerate,
   onTogglePriorityItem,
   onUpdateProgress,
-  onToggleTask,
-  onEditTask,
-  onDeleteTask,
-  onAddTask
+  onEditTask
 }: TodayPriorityViewProps): JSX.Element {
   const [tab, setTab] = useState<'today' | 'history'>('today')
   const [expandedDate, setExpandedDate] = useState<string | null>(null)
-  // Left board defaults to collapsed — focus on the priority list.
-  const [boardExpanded, setBoardExpanded] = useState(false)
 
   const taskMap = new Map(tasks.map((t) => [t.id, t]))
   const todayHasItems = !!todayPriority && todayPriority.items.length > 0
 
   return (
-    <div className={`priority-view ${boardExpanded ? 'priority-view--expanded' : 'priority-view--collapsed'}`}>
-      {/* LEFT: compact four-quadrant board (collapsible, hidden by default) */}
-      {boardExpanded && (
-        <div className="priority-view__left">
-          <QuadrantBoard
-            tasks={tasks}
-            onToggle={onToggleTask}
-            onEdit={onEditTask}
-            onDelete={onDeleteTask}
-            onAddTask={onAddTask}
-            compact
-          />
-        </div>
-      )}
-
-      {/* RIGHT: priority panel */}
+    <div className="priority-view">
+      {/* Priority panel (full width — use the 任务看板 tab for the quadrant board) */}
       <aside className="priority-view__right">
         <div className="priority-panel">
           <div className="priority-panel__header">
-            <div className="priority-panel__headrow">
-              <div>
-                <div className="priority-panel__title">今日优先</div>
-                <div className="priority-panel__hint">
-                  AI 根据四象限与截止日期，为你智能排序今日最该做的事
-                </div>
-              </div>
-              <button
-                className="btn btn--ghost priority-panel__toggle"
-                onClick={() => setBoardExpanded((v) => !v)}
-                title={boardExpanded ? '收起任务看板' : '展开任务看板'}
-              >
-                {boardExpanded ? '收起看板 ‹' : '› 展开看板'}
-              </button>
+            <div className="priority-panel__title">今日优先</div>
+            <div className="priority-panel__hint">
+              AI 根据四象限、截止日期与工作日规则，为你智能排序今日最该做的事
             </div>
           </div>
 

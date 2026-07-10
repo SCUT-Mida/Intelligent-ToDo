@@ -100,20 +100,29 @@ export default function QuadrantBoard({
                       />
                       <div className="task__body">
                         <div className="task__content">{t.content}</div>
-                        {t.dueDate && (
+                        {(t.dueDate || (t.progress ?? 0) > 0) && (
                           <div className="task__meta">
-                            <span
-                              className={`task__due ${
-                                !t.completed && ds === 'overdue'
-                                  ? 'task__due--overdue'
-                                  : !t.completed && ds === 'today'
-                                    ? 'task__due--today'
-                                    : ''
-                              }`}
-                            >
-                              📅 {dueLabel(t.dueDate)}
-                              {!t.completed && ds === 'overdue' ? ' · 已逾期' : ''}
-                            </span>
+                            {t.dueDate && (
+                              <span
+                                className={`task__due ${
+                                  !t.completed && ds === 'overdue'
+                                    ? 'task__due--overdue'
+                                    : !t.completed && ds === 'today'
+                                      ? 'task__due--today'
+                                      : ''
+                                }`}
+                              >
+                                📅 {dueLabel(t.dueDate)}
+                                {!t.completed && ds === 'overdue' ? ' · 已逾期' : ''}
+                              </span>
+                            )}
+                            {(t.progress ?? 0) > 0 && (
+                              <span
+                                className={`task__progress ${t.progress === 100 ? 'task__progress--done' : ''}`}
+                              >
+                                {t.progress === 100 ? '✓ 已完成' : `进度 ${t.progress}%`}
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>

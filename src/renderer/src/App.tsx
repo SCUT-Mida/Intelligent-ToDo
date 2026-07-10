@@ -443,10 +443,7 @@ export default function App(): JSX.Element {
           onRegenerate={handleAiRegenerate}
           onTogglePriorityItem={handleTogglePriorityItem}
           onUpdateProgress={handleUpdateProgress}
-          onToggleTask={toggleTask}
           onEditTask={(t) => setTaskModal({ task: t, quadrant: t.quadrant })}
-          onDeleteTask={deleteTask}
-          onAddTask={(q) => setTaskModal({ task: null, quadrant: q })}
         />
       )}
 
