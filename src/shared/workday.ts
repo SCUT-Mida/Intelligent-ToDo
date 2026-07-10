@@ -116,11 +116,11 @@ export function getDayInfo(date: Date, overrides?: Record<number, YearHolidayDat
   }
   // 3. 贵司规则：月末最后一个周六（走到这里说明非法定节假日）
   if (isLastSaturdayOfMonth(date)) {
-    return { type: 'company-workday', isWorkday: true, label: '班' }
+    return { type: 'company-workday', isWorkday: true, label: '月末周六' }
   }
   // 4. 普通周末
   if (dow === 0 || dow === 6) {
-    return { type: 'weekend', isWorkday: false }
+    return { type: 'weekend', isWorkday: false, label: '休息日' }
   }
   // 5. 普通工作日
   return { type: 'workday', isWorkday: true }

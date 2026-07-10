@@ -158,8 +158,13 @@ export default function CalendarView({ tasks, onToggle, onEdit, holidayOverrides
                 </span>
                 <div className="calendar-grid__chips">
                   {info.type === 'holiday' && (
-                    <span className="cal-chip cal-chip--holiday" title={`${info.label}（法定节假日）`}>
+                    <span className="cal-chip cal-chip--rest" title={`${info.label}（法定节假日）`}>
                       {info.label}
+                    </span>
+                  )}
+                  {info.type === 'weekend' && (
+                    <span className="cal-chip cal-chip--rest" title="周末休息日">
+                      休息日
                     </span>
                   )}
                   {visible.map((t) => (
