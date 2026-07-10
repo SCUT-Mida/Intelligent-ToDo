@@ -55,6 +55,8 @@ export interface Task {
   /** ISO date string (yyyy-mm-dd) or null */
   dueDate: string | null
   completed: boolean
+  /** Completion progress 0-100, stepped by 25 (0, 25, 50, 75, 100). Source of truth — synced with priority items. */
+  progress: number
   /** ISO datetime string */
   createdAt: string
   /** ISO datetime string */

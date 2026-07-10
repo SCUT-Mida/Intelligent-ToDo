@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Task, Quadrant, DailyPriority } from '@shared/types'
 import { getQuadrantMeta } from '@shared/types'
 import QuadrantBoard from './QuadrantBoard'
+import ProgressSteps from './ProgressSteps'
 
 type AiState =
   | { kind: 'idle' }
@@ -31,8 +32,6 @@ interface TodayPriorityViewProps {
   onDeleteTask: (id: string) => void
   onAddTask: (quadrant: Quadrant) => void
 }
-
-const PROGRESS_STEPS = [0, 25, 50, 75, 100]
 
 /** Format a yyyy-mm-dd string as "7月9日 周三". */
 function formatDateZh(dateStr: string): string {
@@ -313,7 +312,7 @@ function TodayTab({
                     {getQuadrantMeta(task.quadrant).shortLabel}
                   </span>
                   <ProgressSteps
-                    current={item.progress}
+                    current={task.progress ?? 0}
                     completed={item.completed}
                     onChange={(p) => onUpdateProgress(item.taskId, p)}
                   />
@@ -324,43 +323,6 @@ function TodayTab({
         )
       })}
     </>
-  )
-}
-
-// ---------------- Progress steps ----------------
-
-interface ProgressStepsProps {
-  current: number
-  completed: boolean
-  onChange: (progress: number) => void
-}
-
-function ProgressSteps({
-  current,
-  completed,
-  onChange
-}: ProgressStepsProps): JSX.Element {
-  const display = completed ? 100 : current
-  return (
-    <div className="priority-progress">
-      <span className="priority-progress__label">进度 {display}%</span>
-      {PROGRESS_STEPS.map((step) => {
-        // Step 0 is never "filled"; steps > 0 fill up to the current level.
-        const isFilled = step > 0 && step <= display
-        const isDone = step === 100 && display === 100
-        return (
-          <button
-            key={step}
-            type="button"
-            className={`progress-step ${isFilled ? 'progress-step--filled' : ''} ${isDone ? 'progress-step--done' : ''}`}
-            title={`${step}%`}
-            onClick={() => onChange(step)}
-          >
-            {step === 0 ? '0' : step === 100 ? '✓' : ''}
-          </button>
-        )
-      })}
-    </div>
   )
 }
 

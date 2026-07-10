@@ -75,22 +75,48 @@ export default function App(): JSX.Element {
 
   // ---- task ops ----
   const handleSaveTask = useCallback(
-    (input: { content: string; quadrant: Quadrant; dueDate: string | null }): void => {
+    (input: { content: string; quadrant: Quadrant; dueDate: string | null; progress: number }): void => {
       const now = new Date().toISOString()
+      const today = todayStr()
+      // Reaching 100% completes the task; below 100% never auto-uncompletes it.
+      const completedByProgress = input.progress === 100
       setData((prev) => {
         const editingId = taskModal?.task?.id
         if (editingId) {
+          const wasCompleted = prev.tasks.find((t) => t.id === editingId)?.completed ?? false
+          const newCompleted = completedByProgress || wasCompleted
           return {
             ...prev,
             tasks: prev.tasks.map((t) =>
-              t.id === editingId ? { ...t, ...input, updatedAt: now } : t
+              t.id === editingId
+                ? { ...t, ...input, completed: newCompleted, updatedAt: now }
+                : t
+            ),
+            // reverse-sync: keep today's priority item in step when edited via task detail
+            priorities: (prev.priorities ?? []).map((dp) =>
+              dp.date === today
+                ? {
+                    ...dp,
+                    updatedAt: now,
+                    items: dp.items.map((it) =>
+                      it.taskId === editingId
+                        ? {
+                            ...it,
+                            progress: input.progress,
+                            completed: completedByProgress || it.completed,
+                            completedAt: completedByProgress && !it.completedAt ? now : it.completedAt
+                          }
+                        : it
+                    )
+                  }
+                : dp
             )
           }
         }
         const nt: Task = {
           id: newId(),
           ...input,
-          completed: false,
+          completed: completedByProgress,
           createdAt: now,
           updatedAt: now
         }
@@ -253,15 +279,21 @@ export default function App(): JSX.Element {
     const now = new Date().toISOString()
     setData((prev) => {
       const task = prev.tasks.find((t) => t.id === taskId)
+      const reachesHundred = progress === 100
       return {
         ...prev,
-        // Reaching 100% also completes the linked task
-        tasks:
-          progress === 100 && task && !task.completed
-            ? prev.tasks.map((t) =>
-                t.id === taskId ? { ...t, completed: true, updatedAt: now } : t
-              )
-            : prev.tasks,
+        // Sync progress onto the Task itself (source of truth) + complete at 100%.
+        tasks: prev.tasks.map((t) =>
+          t.id === taskId
+            ? {
+                ...t,
+                progress,
+                completed: reachesHundred ? true : t.completed,
+                updatedAt: now
+              }
+            : t
+        ),
+        // Keep today's priority item in step too.
         priorities: (prev.priorities ?? []).map((dp) =>
           dp.date === today
             ? {
@@ -272,9 +304,9 @@ export default function App(): JSX.Element {
                     ? {
                         ...item,
                         progress,
-                        completed: progress === 100 ? true : item.completed,
+                        completed: reachesHundred ? true : item.completed,
                         completedAt:
-                          progress === 100 && !item.completedAt ? now : item.completedAt
+                          reachesHundred && !item.completedAt ? now : item.completedAt
                       }
                     : item
                 )

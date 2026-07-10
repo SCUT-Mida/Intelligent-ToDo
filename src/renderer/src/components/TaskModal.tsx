@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react'
 import type { Task, Quadrant } from '@shared/types'
 import { QUADRANTS } from '@shared/types'
+import ProgressSteps from './ProgressSteps'
 
 interface TaskModalProps {
   /** When provided, edit mode; otherwise create mode */
   task?: Task | null
   /** Default quadrant for new tasks */
   defaultQuadrant?: Quadrant
-  onSave: (data: { content: string; quadrant: Quadrant; dueDate: string | null }) => void
+  onSave: (data: { content: string; quadrant: Quadrant; dueDate: string | null; progress: number }) => void
   onClose: () => void
 }
 
@@ -20,6 +21,7 @@ export default function TaskModal({
   const [content, setContent] = useState(task?.content ?? '')
   const [quadrant, setQuadrant] = useState<Quadrant>(task?.quadrant ?? defaultQuadrant)
   const [dueDate, setDueDate] = useState<string>(task?.dueDate ?? '')
+  const [progress, setProgress] = useState<number>(task?.progress ?? 0)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -35,7 +37,8 @@ export default function TaskModal({
     onSave({
       content: trimmed,
       quadrant,
-      dueDate: dueDate || null
+      dueDate: dueDate || null,
+      progress
     })
   }
 
@@ -90,6 +93,16 @@ export default function TaskModal({
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
             />
+          </div>
+
+          <div className="field">
+            <label className="field__label">完成进度</label>
+            <ProgressSteps
+              current={progress}
+              completed={progress === 100}
+              onChange={setProgress}
+            />
+            <div className="field__hint">点击 0/25/50/75/100 调整进度，100% 自动标记为已完成</div>
           </div>
         </div>
         <div className="modal__footer">

@@ -145,3 +145,21 @@ export function describeDay(info: DayInfo): string {
 
 /** 中文星期几。 */
 export const WEEKDAYS_ZH = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+/**
+ * Count working days strictly AFTER `from` up to and including `to`.
+ * Used to tell the AI how many workdays remain until a deadline.
+ * Returns 0 if `to` is on/before `from`.
+ */
+export function remainingWorkdays(from: Date, to: Date, overrides?: Record<number, YearHolidayData>): number {
+  if (to.getTime() <= from.getTime()) return 0
+  let count = 0
+  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  d.setDate(d.getDate() + 1) // start from the day after `from`
+  const end = new Date(to.getFullYear(), to.getMonth(), to.getDate())
+  while (d.getTime() <= end.getTime()) {
+    if (getDayInfo(d, overrides).isWorkday) count++
+    d.setDate(d.getDate() + 1)
+  }
+  return count
+}
