@@ -3,7 +3,7 @@ import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
 import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolidayData } from '../shared/types'
-import { getDayInfo, describeDay, WEEKDAYS_ZH } from '../shared/workday'
+import { getDayInfo, describeDay, WEEKDAYS_ZH, remainingWorkdays } from '../shared/workday'
 import { createDefaultData } from '../shared/types'
 
 const DATA_FILE = join(app.getPath('userData'), 'todo-data.json')
@@ -60,7 +60,10 @@ function loadData(): LoadResult {
         // AI priority snapshots, pomodoro count, and holiday overrides on every
         // restart — analyses "disappeared" even though they were saved.
         ...parsed,
-        tasks: Array.isArray(parsed.tasks) ? (parsed.tasks as Task[]) : defaults.tasks,
+        // Normalize legacy tasks that predate the `progress` field → default 0.
+        tasks: Array.isArray(parsed.tasks)
+          ? (parsed.tasks as Task[]).map((t) => ({ ...t, progress: t.progress ?? 0 }))
+          : defaults.tasks,
         config
       }
     }
@@ -180,35 +183,41 @@ async function aiRecommend(
 
   const taskList = incomplete
     .map((t, i) => {
+      // Annotate each due date with its workday status + remaining workdays,
+      // and include the task's progress, so the AI can reason accurately.
       let due = '，无截止日期'
       if (t.dueDate) {
-        // Annotate each due date with its workday status so the AI can tell
-        // e.g. a deadline falling on a holiday (must finish before it).
         const parts = t.dueDate.split('-').map(Number)
         const dueDate = new Date(parts[0], parts[1] - 1, parts[2])
         const dueInfo = getDayInfo(dueDate, holidayOverrides)
-        due = `，截止：${t.dueDate} ${WEEKDAYS_ZH[dueDate.getDay()]}（${describeDay(dueInfo)}）`
+        const left = remainingWorkdays(today, dueDate, holidayOverrides)
+        due = `，截止：${t.dueDate} ${WEEKDAYS_ZH[dueDate.getDay()]}（${describeDay(dueInfo)}），距今天剩余 ${left} 个工作日`
       }
-      return `${i + 1}. [ID: ${t.id}] [${quadrantName[t.quadrant] ?? t.quadrant}] ${t.content}${due}`
+      const progress = `进度：${t.progress ?? 0}%`
+      return `${i + 1}. [ID: ${t.id}] [${quadrantName[t.quadrant] ?? t.quadrant}] ${t.content}（${progress}）${due}`
     })
     .join('\n')
 
   const systemPrompt =
     '你是一个专业的个人任务管理助手。你熟悉艾森豪威尔矩阵（四象限法则）。' +
-    '你的任务是根据用户的待办事项列表，结合中国法定节假日、调休补班与工作日规则，智能推荐今日应该优先完成的任务。' +
+    '你的任务是根据用户的待办事项列表，结合任务进度、截止日期、中国法定节假日与调休补班规则，智能推荐今日应该优先完成的任务。' +
     '你必须严格以 JSON 格式返回结果，不要包含 markdown 代码块标记或多余说明。'
 
   const userPrompt =
     `今天是 ${todayDesc}。\n` +
     '工作日规则：法定节假日和普通周末不计为可工作日；调休补班日（周末调休为工作日）和每月最后一个周六（贵司规则）计为工作日。' +
     '若某任务截止日落在节假日或周末，应建议提前到节前最近的工作日完成；若今天本身是节假日或周末，应在行动建议中提醒，并酌情减少推荐量或建议休息。\n\n' +
-    `以下是我的未完成待办任务列表：\n\n${taskList}\n\n` +
-    '请综合四象限法则、截止日期、以及上述工作日规则，推荐我今日应该优先完成的 3-5 个任务，并按优先级从高到低排序。\n' +
-    '对每个推荐任务，请简要说明推荐理由（结合紧急程度、重要性、截止日期与是否落在工作日）。\n\n' +
+    `以下是我的未完成待办任务列表（含进度与截止信息）：\n\n${taskList}\n\n` +
+    '请综合四象限法则、任务进度、截止日期与剩余工作日，推荐我今日应该优先完成的 3-5 个任务，并按优先级从高到低排序。\n' +
+    '进度越低的任务通常越需要尽快推进；接近完成（75%+）的任务可优先收尾。\n\n' +
+    '推荐理由格式规范（必须严格遵守）：\n' +
+    '  有截止日期：「截止日期是 yyyy-mm-dd 周x（剩余 N 工作日）— 其他理由说明」\n' +
+    '  无截止日期：「无截止日期 — 其他理由说明」\n' +
+    '其中 yyyy-mm-dd、周x、N 直接使用上面任务列表里给出的值，不要自行计算或编造。「其他理由说明」结合进度、重要紧急程度、是否需在节前完成等，一句话即可。\n\n' +
     '请严格以 JSON 格式返回（不要包含 markdown 代码块标记，不要有多余说明文字），格式如下：\n' +
     '{\n' +
     '  "items": [\n' +
-    '    { "taskId": "<必须使用上面列表中的任务 ID>", "reason": "<推荐理由，一句话>" }\n' +
+    '    { "taskId": "<必须使用上面列表中的任务 ID>", "reason": "<按上述格式的推荐理由>" }\n' +
     '  ],\n' +
     '  "summary": "<今日整体行动建议，一句话>"\n' +
     '}\n\n' +
