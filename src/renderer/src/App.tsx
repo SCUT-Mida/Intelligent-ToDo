@@ -185,7 +185,7 @@ export default function App(): JSX.Element {
     }
     setAiState({ kind: 'loading' })
     try {
-      const result = await window.api.aiRecommend(data.tasks, data.config)
+      const result = await window.api.aiRecommend(data.tasks, data.config, data.holidayOverrides)
       const now = new Date().toISOString()
       const newPriority: DailyPriority = {
         date: today,

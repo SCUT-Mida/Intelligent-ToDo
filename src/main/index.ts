@@ -3,6 +3,7 @@ import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
 import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolidayData } from '../shared/types'
+import { getDayInfo, describeDay, WEEKDAYS_ZH } from '../shared/workday'
 import { createDefaultData } from '../shared/types'
 
 const DATA_FILE = join(app.getPath('userData'), 'todo-data.json')
@@ -146,7 +147,11 @@ function extractJson(content: string): unknown | null {
  * Build the prompt and call an OpenAI-compatible chat completions endpoint.
  * Returns a structured AiPriorityResult with task references + summary.
  */
-async function aiRecommend(tasks: Task[], config: AppConfig): Promise<AiPriorityResult> {
+async function aiRecommend(
+  tasks: Task[],
+  config: AppConfig,
+  holidayOverrides?: Record<number, YearHolidayData>
+): Promise<AiPriorityResult> {
   if (!config.apiUrl || !config.apiKey || !config.model) {
     throw new Error('请先在配置页面填写完整的 AI 配置（URL、Key、Model）')
   }
@@ -161,6 +166,10 @@ async function aiRecommend(tasks: Task[], config: AppConfig): Promise<AiPriority
 
   const today = new Date()
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  // Today's workday status, so the AI knows whether today is a working day,
+  // a holiday, a 调休补班, or the company's last-Saturday workday.
+  const todayInfo = getDayInfo(today, holidayOverrides)
+  const todayDesc = `${todayStr} ${WEEKDAYS_ZH[today.getDay()]}（${describeDay(todayInfo)}）`
 
   const quadrantName: Record<string, string> = {
     q1: '重要·紧急',
@@ -171,20 +180,31 @@ async function aiRecommend(tasks: Task[], config: AppConfig): Promise<AiPriority
 
   const taskList = incomplete
     .map((t, i) => {
-      const due = t.dueDate ? `，截止日期：${t.dueDate}` : '，无截止日期'
+      let due = '，无截止日期'
+      if (t.dueDate) {
+        // Annotate each due date with its workday status so the AI can tell
+        // e.g. a deadline falling on a holiday (must finish before it).
+        const parts = t.dueDate.split('-').map(Number)
+        const dueDate = new Date(parts[0], parts[1] - 1, parts[2])
+        const dueInfo = getDayInfo(dueDate, holidayOverrides)
+        due = `，截止：${t.dueDate} ${WEEKDAYS_ZH[dueDate.getDay()]}（${describeDay(dueInfo)}）`
+      }
       return `${i + 1}. [ID: ${t.id}] [${quadrantName[t.quadrant] ?? t.quadrant}] ${t.content}${due}`
     })
     .join('\n')
 
   const systemPrompt =
     '你是一个专业的个人任务管理助手。你熟悉艾森豪威尔矩阵（四象限法则）。' +
-    '你的任务是根据用户的待办事项列表，智能推荐今日应该优先完成的任务。' +
+    '你的任务是根据用户的待办事项列表，结合中国法定节假日、调休补班与工作日规则，智能推荐今日应该优先完成的任务。' +
     '你必须严格以 JSON 格式返回结果，不要包含 markdown 代码块标记或多余说明。'
 
   const userPrompt =
-    `今天是 ${todayStr}。以下是我的未完成待办任务列表：\n\n${taskList}\n\n` +
-    '请根据四象限法则和截止日期，推荐我今日应该优先完成的 3-5 个任务，并按优先级从高到低排序。\n' +
-    '对每个推荐任务，请简要说明推荐理由（包含紧急程度、重要性、截止日期的影响）。\n\n' +
+    `今天是 ${todayDesc}。\n` +
+    '工作日规则：法定节假日和普通周末不计为可工作日；调休补班日（周末调休为工作日）和每月最后一个周六（贵司规则）计为工作日。' +
+    '若某任务截止日落在节假日或周末，应建议提前到节前最近的工作日完成；若今天本身是节假日或周末，应在行动建议中提醒，并酌情减少推荐量或建议休息。\n\n' +
+    `以下是我的未完成待办任务列表：\n\n${taskList}\n\n` +
+    '请综合四象限法则、截止日期、以及上述工作日规则，推荐我今日应该优先完成的 3-5 个任务，并按优先级从高到低排序。\n' +
+    '对每个推荐任务，请简要说明推荐理由（结合紧急程度、重要性、截止日期与是否落在工作日）。\n\n' +
     '请严格以 JSON 格式返回（不要包含 markdown 代码块标记，不要有多余说明文字），格式如下：\n' +
     '{\n' +
     '  "items": [\n' +
@@ -450,8 +470,10 @@ app.whenReady().then(() => {
     saveData(data)
     return true
   })
-  ipcMain.handle('ai:recommend', (_e, tasks: Task[], config: AppConfig) =>
-    aiRecommend(tasks, config)
+  ipcMain.handle(
+    'ai:recommend',
+    (_e, tasks: Task[], config: AppConfig, holidayOverrides?: Record<number, YearHolidayData>) =>
+      aiRecommend(tasks, config, holidayOverrides)
   )
   ipcMain.handle('holidays:fetch', (_e, year: number) => fetchHolidays(year))
   ipcMain.handle(
