@@ -52,7 +52,9 @@ export default function App(): JSX.Element {
           // Ensure pomodoro state exists for backward compatibility.
           pomodoro: result.data.pomodoro ?? { date: '', count: 0 },
           // Ensure holiday overrides map exists for backward compatibility.
-          holidayOverrides: result.data.holidayOverrides ?? {}
+          holidayOverrides: result.data.holidayOverrides ?? {},
+          // Company last-Saturday rule defaults to true.
+          companyLastSaturday: result.data.companyLastSaturday ?? true
         }
         setData(nextData)
         if (!result.ok) {
@@ -172,6 +174,10 @@ export default function App(): JSX.Element {
     setConfigOpen(false)
   }, [])
 
+  const toggleCompanyLastSaturday = useCallback((v: boolean): void => {
+    setData((prev) => ({ ...prev, companyLastSaturday: v }))
+  }, [])
+
   const exportMd = useCallback(async (): Promise<void> => {
     const md = generateMarkdown(data.tasks)
     try {
@@ -211,7 +217,7 @@ export default function App(): JSX.Element {
     }
     setAiState({ kind: 'loading' })
     try {
-      const result = await window.api.aiRecommend(data.tasks, data.config, data.holidayOverrides)
+      const result = await window.api.aiRecommend(data.tasks, data.config, data.holidayOverrides, { companyLastSaturday: data.companyLastSaturday ?? true })
       const now = new Date().toISOString()
       const newPriority: DailyPriority = {
         date: today,
@@ -453,6 +459,7 @@ export default function App(): JSX.Element {
           onToggle={toggleTask}
           onEdit={(t) => setTaskModal({ task: t, quadrant: t.quadrant })}
           holidayOverrides={data.holidayOverrides}
+          companyLastSaturday={data.companyLastSaturday ?? true}
         />
       )}
 
@@ -483,6 +490,8 @@ export default function App(): JSX.Element {
           loadedHolidayYears={Object.keys(data.holidayOverrides ?? {}).map(Number).sort((a, b) => a - b)}
           onFetchHolidays={fetchHolidays}
           onInstallUpdate={installUpdate}
+          companyLastSaturday={data.companyLastSaturday ?? true}
+          onToggleCompanyLastSaturday={toggleCompanyLastSaturday}
         />
       )}
     </div>

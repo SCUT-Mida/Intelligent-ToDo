@@ -9,6 +9,8 @@ interface CalendarViewProps {
   onEdit: (task: Task) => void
   /** User-fetched holiday overrides (take precedence over bundled data). */
   holidayOverrides?: Record<number, YearHolidayData>
+  /** Company rule: last Saturday of month is a workday. */
+  companyLastSaturday?: boolean
 }
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
@@ -37,7 +39,7 @@ function buildMonthGrid(year: number, month: number): Array<{ dateStr: string; d
   return cells
 }
 
-export default function CalendarView({ tasks, onToggle, onEdit, holidayOverrides }: CalendarViewProps): JSX.Element {
+export default function CalendarView({ tasks, onToggle, onEdit, holidayOverrides, companyLastSaturday = true }: CalendarViewProps): JSX.Element {
   const now = new Date()
   const [viewYear, setViewYear] = useState(now.getFullYear())
   const [viewMonth, setViewMonth] = useState(now.getMonth()) // 0-11
@@ -75,10 +77,10 @@ export default function CalendarView({ tasks, onToggle, onEdit, holidayOverrides
     const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
     let monthWorkdays = 0
     for (let d = 1; d <= daysInMonth; d++) {
-      if (getDayInfo(new Date(viewYear, viewMonth, d), holidayOverrides).isWorkday) monthWorkdays++
+      if (getDayInfo(new Date(viewYear, viewMonth, d), holidayOverrides, { companyLastSaturday }).isWorkday) monthWorkdays++
     }
     return { total, done, incomplete, rate, overdue, byQuadrant, maxQuad, monthWorkdays }
-  }, [tasks, viewYear, viewMonth, holidayOverrides])
+  }, [tasks, viewYear, viewMonth, holidayOverrides, companyLastSaturday])
 
   const todayTasks = tasksByDate.get(todayStr()) ?? []
   const selectedTasks = tasksByDate.get(selectedDate) ?? []
@@ -141,7 +143,7 @@ export default function CalendarView({ tasks, onToggle, onEdit, holidayOverrides
             const isSelected = cell.dateStr === selectedDate
             // Workday / holiday info for this cell
             const [yy, mm, dd] = cell.dateStr.split('-').map(Number)
-            const info = getDayInfo(new Date(yy, mm - 1, dd), holidayOverrides)
+            const info = getDayInfo(new Date(yy, mm - 1, dd), holidayOverrides, { companyLastSaturday })
             const showBadge = info.type === 'adjusted-workday' || info.type === 'company-workday'
             return (
               <button

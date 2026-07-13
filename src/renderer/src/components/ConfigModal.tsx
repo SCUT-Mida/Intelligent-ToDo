@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import type { AppConfig } from '@shared/types'
 import { BUNDLED_HOLIDAY_YEARS } from '@shared/workday'
 
@@ -6,29 +6,40 @@ interface ConfigModalProps {
   config: AppConfig
   onSave: (config: AppConfig) => void
   onClose: () => void
-  /** Trigger Markdown export (moved here from the toolbar — not a frequent action) */
   onExportMarkdown: () => void
-  /** Total task count, shown in the export button hint */
   taskCount: number
-  /** Years the user has fetched (persisted); takes precedence over bundled. */
   loadedHolidayYears: number[]
-  /** Fetch + persist one year's official holiday data. */
   onFetchHolidays: (year: number) => Promise<void>
-  /** Flush latest data to disk, then quit-and-install the update. */
   onInstallUpdate: () => Promise<void>
+  /** Company rule: last Saturday of month is a workday. */
+  companyLastSaturday: boolean
+  onToggleCompanyLastSaturday: (v: boolean) => void
 }
 
 type FetchStatus = { kind: 'idle' } | { kind: 'loading' } | { kind: 'success'; msg: string } | { kind: 'error'; msg: string }
 
-/** Auto-update lifecycle state shown in the Settings panel. */
 type UpdateState =
   | { stage: 'idle' }
   | { stage: 'checking' }
-  | { stage: 'available'; version: string }
+  | { stage: 'available'; version: string; notes?: string }
   | { stage: 'latest' }
   | { stage: 'downloading'; percent: number }
   | { stage: 'downloaded' }
   | { stage: 'error'; message: string }
+
+/** Collapsible settings section with a clickable header and chevron. */
+function Section({ title, children, defaultOpen = true }: { title: string; children: ReactNode; defaultOpen?: boolean }): JSX.Element {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="settings-section">
+      <button type="button" className="settings-section__head" onClick={() => setOpen((v) => !v)}>
+        <span className={`settings-section__chevron ${open ? 'settings-section__chevron--open' : ''}`}>›</span>
+        {title}
+      </button>
+      {open && <div className="settings-section__body">{children}</div>}
+    </div>
+  )
+}
 
 export default function ConfigModal({
   config,
@@ -38,7 +49,9 @@ export default function ConfigModal({
   taskCount,
   loadedHolidayYears,
   onFetchHolidays,
-  onInstallUpdate
+  onInstallUpdate,
+  companyLastSaturday,
+  onToggleCompanyLastSaturday
 }: ConfigModalProps): JSX.Element {
   const [apiUrl, setApiUrl] = useState(config.apiUrl)
   const [apiKey, setApiKey] = useState(config.apiKey)
@@ -50,7 +63,6 @@ export default function ConfigModal({
   const [yearInput, setYearInput] = useState<string>(String(nextYear))
   const [fetchStatus, setFetchStatus] = useState<FetchStatus>({ kind: 'idle' })
 
-  // Auto-update: current app version + packaged flag, and live event stream.
   const [appStatus, setAppStatus] = useState<{ version: string; isPackaged: boolean } | null>(null)
   const [updateState, setUpdateState] = useState<UpdateState>({ stage: 'idle' })
 
@@ -58,7 +70,7 @@ export default function ConfigModal({
     setAppStatus(window.api.getAppStatus())
     const unsub = window.api.onUpdateEvent((e) => {
       if (e.stage === 'checking') setUpdateState({ stage: 'checking' })
-      else if (e.stage === 'available') setUpdateState({ stage: 'available', version: e.version })
+      else if (e.stage === 'available') setUpdateState({ stage: 'available', version: e.version, notes: e.notes })
       else if (e.stage === 'latest') setUpdateState({ stage: 'latest' })
       else if (e.stage === 'downloading') setUpdateState({ stage: 'downloading', percent: e.percent })
       else if (e.stage === 'downloaded') setUpdateState({ stage: 'downloaded' })
@@ -76,11 +88,7 @@ export default function ConfigModal({
   }, [onClose])
 
   const handleSave = (): void => {
-    onSave({
-      apiUrl: apiUrl.trim(),
-      apiKey: apiKey.trim(),
-      model: model.trim()
-    })
+    onSave({ apiUrl: apiUrl.trim(), apiKey: apiKey.trim(), model: model.trim() })
   }
 
   const handleExport = (): void => {
@@ -97,13 +105,7 @@ export default function ConfigModal({
     window.api.downloadUpdate().catch(() => setUpdateState({ stage: 'error', message: '下载失败' }))
   }
   const handleInstall = async (): Promise<void> => {
-    // App.tsx flushes the latest data to disk, THEN quit-and-installs so the
-    // update can never cut off an in-flight save.
-    try {
-      await onInstallUpdate()
-    } catch {
-      setUpdateState({ stage: 'error', message: '安装前保存失败，请重试' })
-    }
+    try { await onInstallUpdate() } catch { setUpdateState({ stage: 'error', message: '安装前保存失败，请重试' }) }
   }
 
   const handleFetchHolidays = async (): Promise<void> => {
@@ -121,7 +123,6 @@ export default function ConfigModal({
     }
   }
 
-  // Display set of available years: bundled + user-fetched (fetched wins the label)
   const fetchedSet = new Set(loadedHolidayYears)
   const allYears = Array.from(new Set([...BUNDLED_HOLIDAY_YEARS, ...loadedHolidayYears])).sort((a, b) => a - b)
 
@@ -130,216 +131,157 @@ export default function ConfigModal({
       <div className="modal modal--wide" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal__header">
           <div className="modal__title">设置</div>
-          <button className="modal__close" onClick={onClose} aria-label="关闭">
-            ×
-          </button>
+          <button className="modal__close" onClick={onClose} aria-label="关闭">×</button>
         </div>
         <div className="modal__body">
-          <div className="settings-section-title">应用更新</div>
 
-          <div className="field">
-            <label className="field__label">版本与更新</label>
-            <div className="field__row">
-              <div className="field__row-text">
-                当前版本 <b>v{appStatus?.version ?? '…'}</b>
-              </div>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                style={{ flexShrink: 0 }}
-                onClick={handleCheckUpdate}
-                disabled={
-                  updateState.stage === 'checking' ||
-                  updateState.stage === 'downloading' ||
-                  updateState.stage === 'downloaded'
-                }
-              >
-                {updateState.stage === 'checking' ? '检查中…' : '检查更新'}
-              </button>
-            </div>
-
-            {updateState.stage === 'available' && (
-              <div className="field__row update-action">
-                <div className="field__hint field__hint--success">
-                  发现新版本 <b>v{updateState.version}</b>，是否下载并安装？
-                </div>
-                <button type="button" className="btn btn--primary" onClick={handleDownload}>
-                  下载并安装
+          {/* ── 应用更新 ── */}
+          <Section title="应用更新">
+            <div className="field">
+              <div className="field__row">
+                <div className="field__row-text">当前版本 <b>v{appStatus?.version ?? '…'}</b></div>
+                <button type="button" className="btn btn--ghost" style={{ flexShrink: 0 }}
+                  onClick={handleCheckUpdate}
+                  disabled={updateState.stage === 'checking' || updateState.stage === 'downloading' || updateState.stage === 'downloaded'}>
+                  {updateState.stage === 'checking' ? '检查中…' : '检查更新'}
                 </button>
               </div>
-            )}
 
-            {updateState.stage === 'downloading' && (
-              <div className="update-progress">
-                <div className="update-progress__bar">
-                  <div className="update-progress__fill" style={{ width: `${updateState.percent}%` }} />
+              {updateState.stage === 'available' && (
+                <div className="update-notice">
+                  <div className="update-notice__head">发现新版本 <b>v{updateState.version}</b></div>
+                  {updateState.notes && (
+                    <div className="update-notice__notes">{updateState.notes}</div>
+                  )}
+                  <button type="button" className="btn btn--primary" onClick={handleDownload} style={{ marginTop: 8 }}>
+                    下载并安装
+                  </button>
                 </div>
-                <div className="field__hint">正在下载更新… {updateState.percent}%</div>
-              </div>
-            )}
-
-            {updateState.stage === 'downloaded' && (
-              <div className="field__row update-action">
-                <div className="field__hint field__hint--success">更新已下载完成，点击安装将退出应用并自动替换为新版本。</div>
-                <button type="button" className="btn btn--primary" onClick={handleInstall}>
-                  退出并安装
-                </button>
-              </div>
-            )}
-
-            {updateState.stage === 'latest' && (
-              <div className="field__hint field__hint--success">✓ 已是最新版本</div>
-            )}
-
-            {updateState.stage === 'error' && (
-              <div className="field__hint field__hint--error">{updateState.message}</div>
-            )}
-
-            <div className="field__hint">
-              {appStatus?.isPackaged
-                ? '仅「安装版」支持自动更新（免安装版请手动到 Release 页下载）。新版本下载完成后点击安装将自动替换并重启。'
-                : '当前为开发/未打包模式，自动更新不可用。'}
-            </div>
-          </div>
-
-          <div className="settings-divider" />
-
-          <div className="settings-section-title">AI 模型</div>
-
-          <div className="field">
-            <label className="field__label">API 地址 (Base URL)</label>
-            <input
-              className="input"
-              placeholder="https://api.openai.com/v1"
-              value={apiUrl}
-              onChange={(e) => setApiUrl(e.target.value)}
-              autoFocus
-            />
-            <div className="field__hint">
-              基于 OpenAI 协议的接口地址，通常以 /v1 结尾，无需包含 /chat/completions
-            </div>
-          </div>
-
-          <div className="field">
-            <label className="field__label">API Key</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                className="input"
-                type={showKey ? 'text' : 'password'}
-                placeholder="sk-..."
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-              />
-              <button
-                type="button"
-                className="btn btn--ghost"
-                style={{ flexShrink: 0 }}
-                onClick={() => setShowKey((v) => !v)}
-              >
-                {showKey ? '隐藏' : '显示'}
-              </button>
-            </div>
-            <div className="field__hint">密钥仅保存在本地，不会上传到任何服务器</div>
-          </div>
-
-          <div className="field">
-            <label className="field__label">模型名称 (Model)</label>
-            <input
-              className="input"
-              placeholder="gpt-4o-mini"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-            />
-            <div className="field__hint">例如：gpt-4o-mini、gpt-4o、deepseek-chat 等</div>
-          </div>
-
-          <div className="settings-divider" />
-
-          <div className="settings-section-title">节假日数据</div>
-
-          <div className="field">
-            <label className="field__label">按年份更新</label>
-            <div className="field__row">
-              <input
-                className="input"
-                type="number"
-                min={2000}
-                max={2100}
-                value={yearInput}
-                onChange={(e) => setYearInput(e.target.value)}
-                style={{ maxWidth: 120 }}
-              />
-              <button
-                type="button"
-                className="btn btn--primary"
-                style={{ flexShrink: 0 }}
-                onClick={handleFetchHolidays}
-                disabled={fetchStatus.kind === 'loading'}
-              >
-                {fetchStatus.kind === 'loading' ? '更新中…' : '更新节假日'}
-              </button>
-            </div>
-            <div className="field__hint">
-              从权威接口拉取该年法定节假日与调休补班，存到本地后离线可用。每年国务院发布次年安排（约 11 月）后更新一次即可，无需更换应用版本。
-            </div>
-            {fetchStatus.kind === 'success' && (
-              <div className="field__hint field__hint--success">{fetchStatus.msg}</div>
-            )}
-            {fetchStatus.kind === 'error' && (
-              <div className="field__hint field__hint--error">{fetchStatus.msg}</div>
-            )}
-          </div>
-
-          <div className="field">
-            <label className="field__label">已加载年份</label>
-            <div className="holiday-years">
-              {allYears.length === 0 ? (
-                <span className="holiday-years__empty">暂无</span>
-              ) : (
-                allYears.map((y) => (
-                  <span key={y} className={`holiday-year ${fetchedSet.has(y) ? 'holiday-year--updated' : ''}`}>
-                    {y}
-                    <span className="holiday-year__tag">
-                      {fetchedSet.has(y) ? '已更新' : '内置'}
-                    </span>
-                  </span>
-                ))
               )}
-            </div>
-          </div>
 
-          <div className="settings-divider" />
+              {updateState.stage === 'downloading' && (
+                <div className="update-progress">
+                  <div className="update-progress__bar">
+                    <div className="update-progress__fill" style={{ width: `${updateState.percent}%` }} />
+                  </div>
+                  <div className="field__hint">正在下载更新… {updateState.percent}%</div>
+                </div>
+              )}
 
-          <div className="settings-section-title">数据</div>
+              {updateState.stage === 'downloaded' && (
+                <div className="field__row update-action" style={{ marginTop: 8 }}>
+                  <div className="field__hint field__hint--success">更新已下载完成，点击安装将退出应用并自动替换为新版本。</div>
+                  <button type="button" className="btn btn--primary" onClick={handleInstall}>退出并安装</button>
+                </div>
+              )}
 
-          <div className="field">
-            <label className="field__label">导出 Markdown</label>
-            <div className="field__row">
-              <div className="field__row-text">
-                把全部 {taskCount} 个任务按四象限分组导出为 .md 文件，便于归档或分享。
+              {updateState.stage === 'latest' && <div className="field__hint field__hint--success">✓ 已是最新版本</div>}
+              {updateState.stage === 'error' && <div className="field__hint field__hint--error">{updateState.message}</div>}
+
+              <div className="field__hint">
+                {appStatus?.isPackaged
+                  ? '仅「安装版」支持自动更新。下载完成后点击安装将自动替换并重启。'
+                  : '当前为开发/未打包模式，自动更新不可用。'}
               </div>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                style={{ flexShrink: 0 }}
-                onClick={handleExport}
-                disabled={taskCount === 0}
-              >
-                导出 .md
-              </button>
             </div>
-            {exportHint && <div className="field__hint">{exportHint}</div>}
-          </div>
+          </Section>
+
+          {/* ── 工作日设置 ── */}
+          <Section title="工作日设置">
+            <div className="field">
+              <label className="field__row" style={{ cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={companyLastSaturday}
+                  onChange={(e) => onToggleCompanyLastSaturday(e.target.checked)}
+                  style={{ width: 16, height: 16, accentColor: 'var(--primary)' }}
+                />
+                <span className="field__row-text">
+                  月末最后一个周六计为工作日（贵司规则）
+                  <br />
+                  <span className="field__hint" style={{ marginTop: 2 }}>
+                    勾选后该日按工作日处理（日历橙色标记）；取消勾选则恢复为普通周末，适用于非贵司用户。
+                  </span>
+                </span>
+              </label>
+            </div>
+          </Section>
+
+          {/* ── AI 模型 ── */}
+          <Section title="AI 模型" defaultOpen={false}>
+            <div className="field">
+              <label className="field__label">API 地址 (Base URL)</label>
+              <input className="input" placeholder="https://api.openai.com/v1" value={apiUrl}
+                onChange={(e) => setApiUrl(e.target.value)} />
+              <div className="field__hint">基于 OpenAI 协议的接口地址，通常以 /v1 结尾</div>
+            </div>
+            <div className="field">
+              <label className="field__label">API Key</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="input" type={showKey ? 'text' : 'password'} placeholder="sk-..." value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)} />
+                <button type="button" className="btn btn--ghost" style={{ flexShrink: 0 }}
+                  onClick={() => setShowKey((v) => !v)}>{showKey ? '隐藏' : '显示'}</button>
+              </div>
+              <div className="field__hint">密钥仅保存在本地，不会上传到任何服务器</div>
+            </div>
+            <div className="field">
+              <label className="field__label">模型名称 (Model)</label>
+              <input className="input" placeholder="gpt-4o-mini" value={model}
+                onChange={(e) => setModel(e.target.value)} />
+              <div className="field__hint">例如：gpt-4o-mini、gpt-4o、deepseek-chat 等</div>
+            </div>
+          </Section>
+
+          {/* ── 节假日数据 ── */}
+          <Section title="节假日数据" defaultOpen={false}>
+            <div className="field">
+              <label className="field__label">按年份更新</label>
+              <div className="field__row">
+                <input className="input" type="number" min={2000} max={2100} value={yearInput}
+                  onChange={(e) => setYearInput(e.target.value)} style={{ maxWidth: 120 }} />
+                <button type="button" className="btn btn--primary" style={{ flexShrink: 0 }}
+                  onClick={handleFetchHolidays} disabled={fetchStatus.kind === 'loading'}>
+                  {fetchStatus.kind === 'loading' ? '更新中…' : '更新节假日'}
+                </button>
+              </div>
+              <div className="field__hint">从权威接口拉取该年法定节假日与调休补班，存到本地后离线可用。每年约 11 月国务院发布后更新一次即可。</div>
+              {fetchStatus.kind === 'success' && <div className="field__hint field__hint--success">{fetchStatus.msg}</div>}
+              {fetchStatus.kind === 'error' && <div className="field__hint field__hint--error">{fetchStatus.msg}</div>}
+            </div>
+            <div className="field">
+              <label className="field__label">已加载年份</label>
+              <div className="holiday-years">
+                {allYears.length === 0 ? (
+                  <span className="holiday-years__empty">暂无</span>
+                ) : (
+                  allYears.map((y) => (
+                    <span key={y} className={`holiday-year ${fetchedSet.has(y) ? 'holiday-year--updated' : ''}`}>
+                      {y}<span className="holiday-year__tag">{fetchedSet.has(y) ? '已更新' : '内置'}</span>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+          </Section>
+
+          {/* ── 数据 ── */}
+          <Section title="数据" defaultOpen={false}>
+            <div className="field">
+              <label className="field__label">导出 Markdown</label>
+              <div className="field__row">
+                <div className="field__row-text">把全部 {taskCount} 个任务按四象限分组导出为 .md 文件。</div>
+                <button type="button" className="btn btn--ghost" style={{ flexShrink: 0 }}
+                  onClick={handleExport} disabled={taskCount === 0}>导出 .md</button>
+              </div>
+              {exportHint && <div className="field__hint">{exportHint}</div>}
+            </div>
+          </Section>
+
         </div>
         <div className="modal__footer">
-          <button className="btn btn--ghost" onClick={onClose}>
-            取消
-          </button>
-          <button
-            className="btn btn--primary"
-            onClick={handleSave}
-            disabled={!apiUrl.trim() || !model.trim()}
-          >
+          <button className="btn btn--ghost" onClick={onClose}>取消</button>
+          <button className="btn btn--primary" onClick={handleSave} disabled={!apiUrl.trim() || !model.trim()}>
             保存配置
           </button>
         </div>

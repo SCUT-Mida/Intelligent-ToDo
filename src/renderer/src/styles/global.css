@@ -1335,6 +1335,66 @@ select {
   font-weight: 500;
 }
 
+/* ---------- Collapsible settings sections ---------- */
+.settings-section {
+  border-bottom: 1px solid var(--border);
+}
+.settings-section:last-child {
+  border-bottom: none;
+}
+.settings-section__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+  transition: color 0.15s;
+}
+.settings-section__head:hover {
+  color: var(--primary);
+}
+.settings-section__chevron {
+  display: inline-block;
+  font-size: 16px;
+  color: var(--text-faint);
+  transition: transform 0.2s;
+  transform: rotate(0deg);
+}
+.settings-section__chevron--open {
+  transform: rotate(90deg);
+}
+.settings-section__body {
+  padding-bottom: 12px;
+}
+
+/* ---------- Update notice with release notes ---------- */
+.update-notice {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: var(--primary-soft);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-sm);
+}
+.update-notice__head {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary);
+  margin-bottom: 6px;
+}
+.update-notice__notes {
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
 /* In-app auto-update */
 .update-action {
   margin-top: 8px;
