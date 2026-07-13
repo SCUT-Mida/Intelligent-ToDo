@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, net } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
@@ -7,6 +7,75 @@ import { getDayInfo, describeDay, WEEKDAYS_ZH, remainingWorkdays } from '../shar
 import { createDefaultData } from '../shared/types'
 
 const DATA_FILE = join(app.getPath('userData'), 'todo-data.json')
+
+// ── Proxy-aware HTTP via Electron's net module ──────────────────────────────
+// Node's global `fetch` (undici) does NOT use the system proxy, so all
+// network requests fail on corporate networks. Electron's `net` module
+// goes through Chromium's network stack, which respects system proxy
+// settings automatically. This wrapper mimics the fetch API.
+
+interface NetResponse {
+  ok: boolean
+  status: number
+  json: () => Promise<unknown>
+  text: () => Promise<string>
+}
+
+function netFetch(
+  url: string,
+  options: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal } = {}
+): Promise<NetResponse> {
+  return new Promise((resolve, reject) => {
+    const request = net.request({ method: options.method ?? 'GET', url })
+
+    if (options.headers) {
+      for (const [key, value] of Object.entries(options.headers)) {
+        request.setHeader(key, value)
+      }
+    }
+
+    const onAbort = (): void => request.abort()
+    if (options.signal) {
+      if (options.signal.aborted) {
+        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }))
+        return
+      }
+      options.signal.addEventListener('abort', onAbort, { once: true })
+    }
+
+    request.on('response', (response) => {
+      const chunks: Buffer[] = []
+      response.on('data', (chunk: Buffer) => chunks.push(chunk))
+      response.on('end', () => {
+        if (options.signal) options.signal.removeEventListener('abort', onAbort)
+        const bodyStr = Buffer.concat(chunks).toString('utf-8')
+        const status = response.statusCode
+        resolve({
+          ok: status >= 200 && status < 300,
+          status,
+          json: () => Promise.resolve(JSON.parse(bodyStr)),
+          text: () => Promise.resolve(bodyStr)
+        })
+      })
+      response.on('error', (err: Error) => {
+        if (options.signal) options.signal.removeEventListener('abort', onAbort)
+        reject(err)
+      })
+    })
+
+    request.on('error', (err: Error) => {
+      if (options.signal) options.signal.removeEventListener('abort', onAbort)
+      if (options.signal?.aborted) {
+        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }))
+      } else {
+        reject(err)
+      }
+    })
+
+    if (options.body) request.write(options.body)
+    request.end()
+  })
+}
 
 const ENC_PREFIX = 'enc:'
 
@@ -227,9 +296,9 @@ async function aiRecommend(
   // Timeout the request so a hung API endpoint can't freeze the UI forever.
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 60000)
-  let resp: Response
+  let resp: NetResponse
   try {
-    resp = await fetch(url, {
+    resp = await netFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -397,9 +466,9 @@ async function fetchHolidays(year: number): Promise<YearHolidayData> {
     try {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 12000)
-      let resp: Response
+      let resp: NetResponse
       try {
-        resp = await fetch(src.url, { signal: controller.signal })
+        resp = await netFetch(src.url, { signal: controller.signal })
       } catch (fetchErr) {
         const isAbort = fetchErr instanceof Error && fetchErr.name === 'AbortError'
         errors.push(`${src.name}：${isAbort ? '请求超时' : '无法访问'}`)
