@@ -4,7 +4,7 @@ import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolida
 /** Update lifecycle events forwarded from main's electron-updater. */
 export type UpdateEvent =
   | { stage: 'checking' }
-  | { stage: 'available'; version: string }
+  | { stage: 'available'; version: string; notes?: string }
   | { stage: 'latest' }
   | { stage: 'downloading'; percent: number }
   | { stage: 'downloaded' }
@@ -16,8 +16,10 @@ const api = {
   aiRecommend: (
     tasks: Task[],
     config: AppConfig,
-    holidayOverrides?: Record<number, YearHolidayData>
-  ): Promise<AiPriorityResult> => ipcRenderer.invoke('ai:recommend', tasks, config, holidayOverrides),
+    holidayOverrides?: Record<number, YearHolidayData>,
+    opts?: { companyLastSaturday?: boolean }
+  ): Promise<AiPriorityResult> =>
+    ipcRenderer.invoke('ai:recommend', tasks, config, holidayOverrides, opts),
   fetchHolidays: (year: number): Promise<YearHolidayData> =>
     ipcRenderer.invoke('holidays:fetch', year),
   exportMarkdown: (content: string, defaultName: string): Promise<boolean> =>

@@ -153,7 +153,8 @@ function extractJson(content: string): unknown | null {
 async function aiRecommend(
   tasks: Task[],
   config: AppConfig,
-  holidayOverrides?: Record<number, YearHolidayData>
+  holidayOverrides?: Record<number, YearHolidayData>,
+  opts?: { companyLastSaturday?: boolean }
 ): Promise<AiPriorityResult> {
   if (!config.apiUrl || !config.apiKey || !config.model) {
     throw new Error('请先在配置页面填写完整的 AI 配置（URL、Key、Model）')
@@ -171,7 +172,7 @@ async function aiRecommend(
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
   // Today's workday status, so the AI knows whether today is a working day,
   // a holiday, a 调休补班, or the company's last-Saturday workday.
-  const todayInfo = getDayInfo(today, holidayOverrides)
+  const todayInfo = getDayInfo(today, holidayOverrides, opts)
   const todayDesc = `${todayStr} ${WEEKDAYS_ZH[today.getDay()]}（${describeDay(todayInfo)}）`
 
   const quadrantName: Record<string, string> = {
@@ -189,8 +190,8 @@ async function aiRecommend(
       if (t.dueDate) {
         const parts = t.dueDate.split('-').map(Number)
         const dueDate = new Date(parts[0], parts[1] - 1, parts[2])
-        const dueInfo = getDayInfo(dueDate, holidayOverrides)
-        const left = remainingWorkdays(today, dueDate, holidayOverrides)
+        const dueInfo = getDayInfo(dueDate, holidayOverrides, opts)
+        const left = remainingWorkdays(today, dueDate, holidayOverrides, opts)
         due = `，截止：${t.dueDate} ${WEEKDAYS_ZH[dueDate.getDay()]}（${describeDay(dueInfo)}），距今天剩余 ${left} 个工作日`
       }
       const progress = `进度：${t.progress ?? 0}%`
@@ -481,8 +482,13 @@ app.whenReady().then(() => {
   })
   ipcMain.handle(
     'ai:recommend',
-    (_e, tasks: Task[], config: AppConfig, holidayOverrides?: Record<number, YearHolidayData>) =>
-      aiRecommend(tasks, config, holidayOverrides)
+    (
+      _e,
+      tasks: Task[],
+      config: AppConfig,
+      holidayOverrides?: Record<number, YearHolidayData>,
+      opts?: { companyLastSaturday?: boolean }
+    ) => aiRecommend(tasks, config, holidayOverrides, opts)
   )
   ipcMain.handle('holidays:fetch', (_e, year: number) => fetchHolidays(year))
   ipcMain.handle(
@@ -515,7 +521,14 @@ app.whenReady().then(() => {
     }
   }
   autoUpdater.on('checking-for-update', () => send({ stage: 'checking' }))
-  autoUpdater.on('update-available', (info) => send({ stage: 'available', version: info.version }))
+  autoUpdater.on('update-available', (info: { version?: string; releaseNotes?: unknown }) => {
+    const notes = typeof info.releaseNotes === 'string'
+      ? info.releaseNotes
+      : Array.isArray(info.releaseNotes)
+        ? info.releaseNotes.map((r) => (typeof r === 'string' ? r : '')).join('\n')
+        : ''
+    send({ stage: 'available', version: info.version ?? '', notes })
+  })
   autoUpdater.on('update-not-available', () => send({ stage: 'latest' }))
   autoUpdater.on('download-progress', (p) => send({ stage: 'downloading', percent: Math.round(p.percent) }))
   autoUpdater.on('update-downloaded', () => send({ stage: 'downloaded' }))

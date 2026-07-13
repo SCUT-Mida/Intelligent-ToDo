@@ -81,6 +81,8 @@ export interface AppData {
   pomodoro?: PomodoroState
   /** User-fetched holiday data, keyed by year. Overrides the bundled dataset when present. */
   holidayOverrides?: Record<number, YearHolidayData>
+  /** Company rule: treat the last Saturday of each month as a workday. Default true. */
+  companyLastSaturday?: boolean
 }
 
 /** A single AI-recommended priority item pointing to an existing task. */
@@ -149,7 +151,8 @@ export function createDefaultData(): AppData {
     config: { ...DEFAULT_CONFIG },
     priorities: [],
     pomodoro: { date: '', count: 0 },
-    holidayOverrides: {}
+    holidayOverrides: {},
+    companyLastSaturday: true
   }
 }
 
