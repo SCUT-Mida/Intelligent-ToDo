@@ -186,8 +186,8 @@ export default function ConfigModal({
             </div>
           </Section>
 
-          {/* ── 工作日设置 ── */}
-          <Section title="工作日设置">
+          {/* ── 工作日与节假日 ── */}
+          <Section title="工作日与节假日" defaultOpen={false}>
             <div className="field">
               <label className="field__row" style={{ cursor: 'pointer' }}>
                 <input
@@ -204,6 +204,37 @@ export default function ConfigModal({
                   </span>
                 </span>
               </label>
+            </div>
+
+            <div className="settings-divider" />
+
+            <div className="field">
+              <label className="field__label">按年份更新节假日</label>
+              <div className="field__row">
+                <input className="input" type="number" min={2000} max={2100} value={yearInput}
+                  onChange={(e) => setYearInput(e.target.value)} style={{ maxWidth: 120 }} />
+                <button type="button" className="btn btn--primary" style={{ flexShrink: 0 }}
+                  onClick={handleFetchHolidays} disabled={fetchStatus.kind === 'loading'}>
+                  {fetchStatus.kind === 'loading' ? '更新中…' : '更新节假日'}
+                </button>
+              </div>
+              <div className="field__hint">从权威接口拉取该年法定节假日与调休补班，存到本地后离线可用。每年约 11 月国务院发布后更新一次即可。</div>
+              {fetchStatus.kind === 'success' && <div className="field__hint field__hint--success">{fetchStatus.msg}</div>}
+              {fetchStatus.kind === 'error' && <div className="field__hint field__hint--error">{fetchStatus.msg}</div>}
+            </div>
+            <div className="field">
+              <label className="field__label">已加载年份</label>
+              <div className="holiday-years">
+                {allYears.length === 0 ? (
+                  <span className="holiday-years__empty">暂无</span>
+                ) : (
+                  allYears.map((y) => (
+                    <span key={y} className={`holiday-year ${fetchedSet.has(y) ? 'holiday-year--updated' : ''}`}>
+                      {y}<span className="holiday-year__tag">{fetchedSet.has(y) ? '已更新' : '内置'}</span>
+                    </span>
+                  ))
+                )}
+              </div>
             </div>
           </Section>
 
@@ -230,38 +261,6 @@ export default function ConfigModal({
               <input className="input" placeholder="gpt-4o-mini" value={model}
                 onChange={(e) => setModel(e.target.value)} />
               <div className="field__hint">例如：gpt-4o-mini、gpt-4o、deepseek-chat 等</div>
-            </div>
-          </Section>
-
-          {/* ── 节假日数据 ── */}
-          <Section title="节假日数据" defaultOpen={false}>
-            <div className="field">
-              <label className="field__label">按年份更新</label>
-              <div className="field__row">
-                <input className="input" type="number" min={2000} max={2100} value={yearInput}
-                  onChange={(e) => setYearInput(e.target.value)} style={{ maxWidth: 120 }} />
-                <button type="button" className="btn btn--primary" style={{ flexShrink: 0 }}
-                  onClick={handleFetchHolidays} disabled={fetchStatus.kind === 'loading'}>
-                  {fetchStatus.kind === 'loading' ? '更新中…' : '更新节假日'}
-                </button>
-              </div>
-              <div className="field__hint">从权威接口拉取该年法定节假日与调休补班，存到本地后离线可用。每年约 11 月国务院发布后更新一次即可。</div>
-              {fetchStatus.kind === 'success' && <div className="field__hint field__hint--success">{fetchStatus.msg}</div>}
-              {fetchStatus.kind === 'error' && <div className="field__hint field__hint--error">{fetchStatus.msg}</div>}
-            </div>
-            <div className="field">
-              <label className="field__label">已加载年份</label>
-              <div className="holiday-years">
-                {allYears.length === 0 ? (
-                  <span className="holiday-years__empty">暂无</span>
-                ) : (
-                  allYears.map((y) => (
-                    <span key={y} className={`holiday-year ${fetchedSet.has(y) ? 'holiday-year--updated' : ''}`}>
-                      {y}<span className="holiday-year__tag">{fetchedSet.has(y) ? '已更新' : '内置'}</span>
-                    </span>
-                  ))
-                )}
-              </div>
             </div>
           </Section>
 
