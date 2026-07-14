@@ -591,11 +591,24 @@ app.whenReady().then(() => {
   }
   autoUpdater.on('checking-for-update', () => send({ stage: 'checking' }))
   autoUpdater.on('update-available', (info: { version?: string; releaseNotes?: unknown }) => {
-    const notes = typeof info.releaseNotes === 'string'
+    const rawNotes = typeof info.releaseNotes === 'string'
       ? info.releaseNotes
       : Array.isArray(info.releaseNotes)
         ? info.releaseNotes.map((r) => (typeof r === 'string' ? r : '')).join('\n')
         : ''
+    // Strip HTML tags that electron-updater may inject (e.g. <p>, <br>, <strong>)
+    const notes = rawNotes
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<\/li>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
     send({ stage: 'available', version: info.version ?? '', notes })
   })
   autoUpdater.on('update-not-available', () => send({ stage: 'latest' }))
