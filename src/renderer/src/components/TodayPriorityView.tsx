@@ -29,6 +29,17 @@ interface TodayPriorityViewProps {
   onEditTask: (task: Task) => void
 }
 
+/** Strip task IDs / UUIDs that the AI may leak into the reason text. */
+function cleanReason(reason: string): string {
+  return reason
+    .replace(/\[ID:\s*[^\]]*\]/gi, '')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '')
+    .replace(/ID[：:]\s*[0-9a-f\-]{8,}/gi, '')
+    .replace(/\s*[—\-]\s*$/, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
 /** Format a yyyy-mm-dd string as "7月9日 周三". */
 function formatDateZh(dateStr: string): string {
   const parts = dateStr.split('-')
@@ -265,7 +276,7 @@ function TodayTab({
                   </button>
                 )}
               </div>
-              {reason && <div className="priority-item__reason">{reason}</div>}
+              {reason && <div className="priority-item__reason">{cleanReason(reason)}</div>}
               {!task && (
                 <div className="priority-item__deleted">该任务已被删除</div>
               )}

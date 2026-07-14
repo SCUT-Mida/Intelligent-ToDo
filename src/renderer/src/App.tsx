@@ -223,7 +223,12 @@ export default function App(): JSX.Element {
         date: today,
         items: result.items.map((item) => ({
           taskId: item.taskId,
-          reason: item.reason,
+          reason: item.reason
+            .replace(/\[ID:\s*[^\]]*\]/gi, '')
+            .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '')
+            .replace(/ID[：:]\s*[0-9a-f\-]{8,}/gi, '')
+            .replace(/\s{2,}/g, ' ')
+            .trim(),
           progress: 0,
           completed: false,
           completedAt: null
