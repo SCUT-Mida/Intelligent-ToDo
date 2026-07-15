@@ -57,10 +57,25 @@ export interface Task {
   completed: boolean
   /** Completion progress 0-100, stepped by 25 (0, 25, 50, 75, 100). Source of truth — synced with priority items. */
   progress: number
+  /** Recurrence pattern. Undefined = one-time task (单次). */
+  recurrence?: TaskRecurrence
   /** ISO datetime string */
   createdAt: string
   /** ISO datetime string */
   updatedAt: string
+}
+
+/** Recurrence pattern for recurring tasks. */
+export interface TaskRecurrence {
+  type: 'weekly' | 'monthly' | 'yearly'
+  /** Weekly only: selected weekdays (0=Sun, 1=Mon, ..., 6=Sat) */
+  weekdays?: number[]
+  /** Monthly only: day of month (1-31) */
+  monthDay?: number
+  /** Yearly only: month (1-12) */
+  yearMonth?: number
+  /** Yearly only: day of month (1-31) */
+  yearDay?: number
 }
 
 /** AI model configuration (OpenAI-compatible) */
