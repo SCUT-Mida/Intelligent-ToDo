@@ -2211,6 +2211,76 @@ select {
   line-height: 1.6;
 }
 
+/* ---------- Task frequency / recurrence picker ---------- */
+.freq-picker {
+  display: flex;
+  gap: 6px;
+}
+
+.freq-option {
+  flex: 1;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  transition: all 0.15s;
+}
+
+.freq-option:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.freq-option--active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+
+.freq-sub {
+  margin-top: 8px;
+}
+
+.weekday-picker {
+  display: flex;
+  gap: 4px;
+}
+
+.weekday-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+
+.weekday-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.weekday-btn--active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+/* Recurrence badge on task cards */
+.task__recurrence {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
 /* ---------- Scrollbar ---------- */
 ::-webkit-scrollbar {
   width: 8px;

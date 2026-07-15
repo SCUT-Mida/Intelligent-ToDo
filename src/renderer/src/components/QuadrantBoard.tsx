@@ -1,5 +1,6 @@
 import type { Task, Quadrant } from '@shared/types'
 import { QUADRANTS } from '@shared/types'
+import { formatRecurrence } from '@shared/recurrence'
 
 interface QuadrantBoardProps {
   /** All tasks; the component filters by quadrant internally */
@@ -100,7 +101,7 @@ export default function QuadrantBoard({
                       />
                       <div className="task__body">
                         <div className="task__content">{t.content}</div>
-                        {(t.dueDate || (t.progress ?? 0) > 0) && (
+                        {(t.dueDate || (t.progress ?? 0) > 0 || t.recurrence) && (
                           <div className="task__meta">
                             {t.dueDate && (
                               <span
@@ -115,6 +116,9 @@ export default function QuadrantBoard({
                                 📅 {dueLabel(t.dueDate)}
                                 {!t.completed && ds === 'overdue' ? ' · 已逾期' : ''}
                               </span>
+                            )}
+                            {t.recurrence && (
+                              <span className="task__recurrence">🔁 {formatRecurrence(t.recurrence)}</span>
                             )}
                             {(t.progress ?? 0) > 0 && (
                               <span

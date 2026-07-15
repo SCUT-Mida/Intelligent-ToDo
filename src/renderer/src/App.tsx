@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { AppData, Task, Quadrant, AppConfig, DailyPriority } from '@shared/types'
+import type { AppData, Task, Quadrant, AppConfig, DailyPriority, TaskRecurrence } from '@shared/types'
 import { createDefaultData } from '@shared/types'
+import { computeNextOccurrence } from '@shared/recurrence'
 import TaskModal from './components/TaskModal'
 import ConfigModal from './components/ConfigModal'
 import QuadrantBoard from './components/QuadrantBoard'
@@ -77,10 +78,11 @@ export default function App(): JSX.Element {
 
   // ---- task ops ----
   const handleSaveTask = useCallback(
-    (input: { content: string; quadrant: Quadrant; dueDate: string | null; progress: number }): void => {
+    (input: { content: string; quadrant: Quadrant; dueDate: string | null; progress: number; recurrence?: TaskRecurrence }): void => {
       const now = new Date().toISOString()
       const today = todayStr()
-      // Reaching 100% completes the task; below 100% never auto-uncompletes it.
+      // For recurring tasks, the due date is derived from the recurrence pattern.
+      const effectiveDue = input.recurrence ? computeNextOccurrence(input.recurrence) : input.dueDate
       const completedByProgress = input.progress === 100
       setData((prev) => {
         const editingId = taskModal?.task?.id
@@ -91,7 +93,7 @@ export default function App(): JSX.Element {
             ...prev,
             tasks: prev.tasks.map((t) =>
               t.id === editingId
-                ? { ...t, ...input, completed: newCompleted, updatedAt: now }
+                ? { ...t, ...input, dueDate: effectiveDue, recurrence: input.recurrence, completed: newCompleted, updatedAt: now }
                 : t
             ),
             // reverse-sync: keep today's priority item in step when edited via task detail
@@ -118,6 +120,8 @@ export default function App(): JSX.Element {
         const nt: Task = {
           id: newId(),
           ...input,
+          dueDate: effectiveDue,
+          recurrence: input.recurrence,
           completed: completedByProgress,
           createdAt: now,
           updatedAt: now
@@ -136,6 +140,36 @@ export default function App(): JSX.Element {
       const task = prev.tasks.find((t) => t.id === id)
       if (!task) return prev
       const newCompleted = !task.completed
+
+      // Recurring task being completed → advance to next occurrence instead of
+      // staying completed. The user gets the satisfaction of checking it off,
+      // and the task immediately resets for the next cycle.
+      if (newCompleted && task.recurrence) {
+        const nextDue = computeNextOccurrence(task.recurrence)
+        return {
+          ...prev,
+          tasks: prev.tasks.map((t) =>
+            t.id === id
+              ? { ...t, completed: false, progress: 0, dueDate: nextDue, updatedAt: now }
+              : t
+          ),
+          // Priority items: reset to match
+          priorities: (prev.priorities ?? []).map((dp) =>
+            dp.date === today
+              ? {
+                  ...dp,
+                  updatedAt: now,
+                  items: dp.items.map((item) =>
+                    item.taskId === id
+                      ? { ...item, completed: false, progress: 0, completedAt: null }
+                      : item
+                  )
+                }
+              : dp
+          )
+        }
+      }
+
       return {
         ...prev,
         tasks: prev.tasks.map((t) =>
@@ -152,7 +186,6 @@ export default function App(): JSX.Element {
                     ? {
                         ...item,
                         completed: newCompleted,
-                        // Snapping progress to 100 on complete; leave as-is when un-completing.
                         progress: newCompleted ? 100 : item.progress,
                         completedAt: newCompleted ? now : null
                       }
