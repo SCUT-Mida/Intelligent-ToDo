@@ -8,6 +8,11 @@ type FreqType = 'once' | 'weekly' | 'monthly' | 'yearly'
 
 const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六']
 
+/** Max days in a given month (1-12), non-leap-year for simplicity. */
+function maxDaysInMonth(month: number): number {
+  return [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 31
+}
+
 interface TaskModalProps {
   task?: Task | null
   defaultQuadrant?: Quadrant
@@ -139,20 +144,28 @@ export default function TaskModal({
                   <span className="field__row-text">日</span>
                 </div>
                 <div className="field__hint">🔁 {formatRecurrence({ type: 'monthly', monthDay })}，完成时自动推进到下次</div>
+                {monthDay > 28 && (
+                  <div className="field__hint field__hint--error">提示：选 {monthDay} 日时，2 月等不足 {monthDay} 天的月份将自动取当月最后一天</div>
+                )}
               </div>
             )}
 
-            {/* Yearly: month + day */}
+            {/* Yearly: month + day (day max follows the chosen month) */}
             {freqType === 'yearly' && (
               <div className="freq-sub">
                 <div className="field__row">
                   <span className="field__row-text">每年</span>
                   <select className="select" value={yearMonth}
-                    onChange={(e) => setYearMonth(parseInt(e.target.value))} style={{ maxWidth: 100 }}>
+                    onChange={(e) => {
+                      const m = parseInt(e.target.value)
+                      setYearMonth(m)
+                      setYearDay((prev) => Math.min(prev, maxDaysInMonth(m)))
+                    }}
+                    style={{ maxWidth: 100 }}>
                     {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}月</option>)}
                   </select>
-                  <input className="input" type="number" min={1} max={31} value={yearDay}
-                    onChange={(e) => setYearDay(Math.max(1, Math.min(31, parseInt(e.target.value) || 1)))}
+                  <input className="input" type="number" min={1} max={maxDaysInMonth(yearMonth)} value={yearDay}
+                    onChange={(e) => setYearDay(Math.max(1, Math.min(maxDaysInMonth(yearMonth), parseInt(e.target.value) || 1)))}
                     style={{ maxWidth: 80 }} />
                   <span className="field__row-text">日</span>
                 </div>
