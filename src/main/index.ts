@@ -459,7 +459,7 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     show: false,
     autoHideMenuBar: true,
-    title: '本地AI工具合集',
+    title: '本地AI工具集',
     backgroundColor: '#f5f6f8',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

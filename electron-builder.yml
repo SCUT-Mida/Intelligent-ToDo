@@ -50,8 +50,8 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: 智能化代办
-  uninstallDisplayName: 智能化代办
+  shortcutName: 本地AI工具集
+  uninstallDisplayName: 本地AI工具集
 
 # 免安装版（单 exe 直接运行，解压到临时目录）
 portable:
