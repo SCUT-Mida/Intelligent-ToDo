@@ -106,7 +106,6 @@ export interface RankedRepoMatch {
 
 export const IPC_V2 = {
   REPO_DESCRIBE_BATCH: 'repoNav:describeBatch',
-  REPO_SEARCH: 'repoNav:search',
   REPO_GET_MEMORY: 'repoNav:getMemory',
   REPO_REGENERATE_MEMORY: 'repoNav:regenerateMemory',
 } as const

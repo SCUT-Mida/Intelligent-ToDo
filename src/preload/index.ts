@@ -7,7 +7,6 @@ import type { AiConfigScanResult } from '../shared/aiConfig'
 
 // V2 IPC channels for AI memory features (will be moved to shared IPC_V2 when backend lands)
 const IPC_V2_LOCAL = {
-  REPO_SEARCH: 'repoNav:search',
   REPO_GET_MEMORY: 'repoNav:getMemory',
   REPO_REGENERATE_MEMORY: 'repoNav:regenerateMemory',
   REPO_DESCRIBE_BATCH: 'repoNav:describeBatch'
@@ -73,8 +72,6 @@ const repoNav = {
   getConfigPath: (): Promise<string | null> => ipcRenderer.invoke(IPC.GET_CONFIG_PATH),
   probeTool: (kindOrBinary: string): Promise<ToolProbeResult> => ipcRenderer.invoke(IPC.PROBE_TOOL, kindOrBinary),
   // V2 AI memory features
-  searchRepos: (query: string): Promise<Array<{ repoPath: string; repoName: string; score: number; reason: string }>> =>
-    ipcRenderer.invoke(IPC_V2_LOCAL.REPO_SEARCH, query),
   getMemory: (): Promise<{ version: number; generatedAt: string; entries: Array<{ name: string; path: string; description: string | null; tags: string[]; generatedAt: string }> } | null> =>
     ipcRenderer.invoke(IPC_V2_LOCAL.REPO_GET_MEMORY),
   regenerateMemory: (): Promise<{ success: boolean; memory?: { version: number; generatedAt: string; entries: Array<{ name: string; path: string; description: string | null; tags: string[]; generatedAt: string }> }; error?: string }> =>

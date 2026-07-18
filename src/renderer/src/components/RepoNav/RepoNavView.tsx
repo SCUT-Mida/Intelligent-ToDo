@@ -69,17 +69,30 @@ export default function RepoNavView({ memoryMap }: RepoNavViewProps): JSX.Elemen
     return () => { cancelled = true }
   }, [])
 
-  // Filter repos by name or path (case-insensitive)
+  // Filter repos by name, path, tag, or description (case-insensitive).
+  // Multiple search terms can be space-separated; a repo matches if ANY term
+  // hits any field (OR semantics — broad recall preferred over precision
+  // for a small list).
   const filteredRepos = useMemo(() => {
-    if (!filter.trim()) return repos
-    const lower = filter.toLowerCase()
-    return repos.filter(
-      (r) =>
-        r.name.toLowerCase().includes(lower) ||
-        r.path.toLowerCase().includes(lower) ||
-        r.relativePath.toLowerCase().includes(lower)
-    )
-  }, [repos, filter])
+    const q = filter.trim().toLowerCase()
+    if (!q) return repos
+    const terms = q.split(/\s+/).filter((t) => t.length > 0)
+    return repos.filter((r) => {
+      // Gather all searchable fields for this repo
+      const fields: string[] = [
+        r.name.toLowerCase(),
+        r.path.toLowerCase(),
+        r.relativePath.toLowerCase()
+      ]
+      const mem = memoryMap?.[r.path]
+      if (mem) {
+        if (mem.description) fields.push(mem.description.toLowerCase())
+        if (mem.tags?.length) fields.push(mem.tags.join(' ').toLowerCase())
+      }
+      // Match if ANY field contains ANY search term
+      return terms.some((term) => fields.some((f) => f.includes(term)))
+    })
+  }, [repos, filter, memoryMap])
 
   // Handle refresh (re-scan) — only triggered manually
   const handleRefresh = useCallback(async (): Promise<void> => {
@@ -135,7 +148,7 @@ export default function RepoNavView({ memoryMap }: RepoNavViewProps): JSX.Elemen
         <input
           className="input repo-nav-view__search"
           type="text"
-          placeholder="搜索仓库名称或路径..."
+          placeholder="搜索仓库名、路径、标签或描述…"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />

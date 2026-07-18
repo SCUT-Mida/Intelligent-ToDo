@@ -17,7 +17,7 @@ import type { ToolKind } from '../../shared/repoNav'
 import { getConfig, saveConfig, getConfigPath } from './config'
 import { scanRepos } from './scanner'
 import { openRepoInTerminal } from './launcher'
-import { generateMemoryEntries, searchRepos, loadMemory, saveMemory } from './aiMemory'
+import { generateMemoryEntries, loadMemory, saveMemory } from './aiMemory'
 import { dataFilePath } from './paths'
 import { decryptApiKey } from '../crypto'
 import { logger } from '../logger'
@@ -190,19 +190,6 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
       return await generateMemoryEntries(repos, config, aiConfig)
     } catch (err) {
       throw err // Let the caller handle errors for this streaming-like operation
-    }
-  })
-
-  // ── SEARCH: semantic repo search ──────────────────────────────────────
-  ipc.handle(IPC_V2.REPO_SEARCH, async (_e: IpcMainInvokeEvent, query: string) => {
-    try {
-      const memory = loadMemory()
-      if (!memory || memory.entries.length === 0) return []
-      const aiConfig = getAIConfig()
-      if (!aiConfig) return []
-      return await searchRepos(query, memory, aiConfig)
-    } catch {
-      return []
     }
   })
 }
