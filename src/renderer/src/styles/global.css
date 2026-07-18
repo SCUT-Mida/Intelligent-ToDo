@@ -2299,3 +2299,731 @@ select {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ========== Repo Navigator ========== */
+
+.repo-nav-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 16px 20px 20px;
+}
+
+.repo-nav-view__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.repo-nav-view__search {
+  flex: 1;
+  max-width: 360px;
+}
+
+.repo-nav-view__template {
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.repo-nav-view__info {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.repo-nav-view__error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.repo-nav-view__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 48px 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.repo-nav-view__empty {
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 14px;
+  padding: 48px 16px;
+  line-height: 1.7;
+  flex-shrink: 0;
+}
+
+.repo-nav-view__grid {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+
+/* ── Repo Card ── */
+
+.repo-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.repo-card:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border-strong);
+}
+
+.repo-card__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.repo-card__name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.repo-card__branch {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.repo-card__path {
+  font-size: 12px;
+  color: var(--text-faint);
+  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-card__commit {
+  display: flex;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.repo-card__commit-label {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.repo-card__commit-msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: break-word;
+}
+
+.repo-card__meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.repo-card__meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.repo-card__remote {
+  font-size: 11px;
+  color: var(--text-faint);
+  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-card__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.repo-card__open {
+  align-self: flex-start;
+}
+
+/* ── Toast notification ── */
+
+.repo-nav-view__toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  z-index: 200;
+  animation: fadein 0.2s ease;
+  pointer-events: none;
+}
+
+.repo-nav-view__toast--success {
+  background: var(--success);
+  color: #fff;
+}
+
+.repo-nav-view__toast--error {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* ══════════════ App Shell (new layout) ══════════════ */
+
+.app-shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell__content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 48px 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* ── Activity Bar (left rail) ── */
+
+.activity-bar {
+  width: 64px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 4px;
+  z-index: 10;
+}
+
+.activity-bar__apps {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.activity-bar__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 52px;
+  padding: 8px 4px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: background 0.15s, color 0.15s;
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  position: relative;
+}
+
+.activity-bar__item:hover {
+  background: #f3f4f6;
+  color: var(--text);
+}
+
+.activity-bar__item--active {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.activity-bar__item--active::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 24px;
+  background: var(--primary);
+  border-radius: 0 2px 2px 0;
+}
+
+.activity-bar__icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.activity-bar__label {
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 52px;
+}
+
+.activity-bar__spacer {
+  flex: 1;
+}
+
+.activity-bar__settings {
+  margin-top: auto;
+  margin-bottom: 4px;
+}
+
+.activity-bar__settings .activity-bar__icon {
+  font-size: 20px;
+}
+
+/* ── Todo App wrapper ── */
+
+.todo-app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.todo-app__content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Unified Settings Modal ── */
+
+.unified-settings {
+  width: 720px !important;
+  height: 560px;
+  max-height: calc(100vh - 60px);
+  display: flex;
+  flex-direction: column;
+}
+
+.unified-settings__body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.unified-settings__sidebar {
+  width: 140px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.unified-settings__tab {
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-align: left;
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  font-family: inherit;
+  border-radius: 0;
+}
+
+.unified-settings__tab:hover {
+  background: #f3f4f6;
+  color: var(--text);
+}
+
+.unified-settings__tab--active {
+  color: var(--primary);
+  background: var(--primary-soft);
+  font-weight: 600;
+}
+
+.unified-settings__content {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+/* ── AI Search Input ── */
+
+.ai-search-input {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 2px var(--primary-soft) !important;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ai-search-input:focus {
+  border-color: var(--primary-hover) !important;
+  box-shadow: 0 0 0 4px var(--primary-soft) !important;
+}
+
+/* ── AI Memory Wizard ── */
+
+.ai-memory-wizard {
+  width: 420px !important;
+}
+
+.ai-memory-wizard__confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  padding: 16px 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.ai-memory-wizard__icon {
+  font-size: 40px;
+}
+
+.ai-memory-wizard__icon--success {
+  font-size: 36px;
+}
+
+.ai-memory-wizard__icon--error {
+  font-size: 36px;
+}
+
+.ai-memory-wizard__hint {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.ai-memory-wizard__progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 24px 0;
+}
+
+.ai-memory-wizard__status {
+  font-size: 14px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.ai-memory-wizard__bar {
+  width: 100%;
+  height: 6px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.ai-memory-wizard__bar-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 999px;
+  transition: width 0.3s;
+}
+
+.ai-memory-wizard__bar-fill--indeterminate {
+  width: 30%;
+  animation: wizard-progress 1.5s ease infinite;
+}
+
+@keyframes wizard-progress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.ai-memory-wizard__done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  text-align: center;
+  font-size: 14px;
+}
+
+.ai-memory-wizard__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  text-align: center;
+}
+
+/* ── Command Template Editor (table) ── */
+
+.command-template-editor {
+  overflow-x: auto;
+}
+
+.command-template-editor__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.command-template-editor__table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+
+.command-template-editor__table td {
+  padding: 4px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.command-template-editor__table .input {
+  padding: 6px 8px;
+  font-size: 12.5px;
+}
+
+.command-template-editor__id {
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11px !important;
+  color: var(--text-faint) !important;
+  background: #f9fafb !important;
+  width: 110px;
+}
+
+.command-template-editor__command {
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px !important;
+}
+
+/* ── Repo Nav App (wrapper) ── */
+
+.repo-nav-app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px 20px 0;
+}
+
+.repo-nav-app__memory-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--primary-soft);
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.repo-nav-app__memory-status {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--primary);
+}
+
+.repo-nav-app__ai-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.repo-nav-app__ai-search-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.repo-nav-app__ai-search .input {
+  flex: 1;
+}
+
+.repo-nav-app__ai-results {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  margin-bottom: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.repo-nav-app__ai-results-header {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  background: #fafbfc;
+}
+
+.repo-nav-app__ai-results-empty {
+  padding: 16px 12px;
+  font-size: 13px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.repo-nav-app__ai-results-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.repo-nav-app__ai-result-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  align-items: flex-start;
+}
+
+.repo-nav-app__ai-result-item:last-child {
+  border-bottom: none;
+}
+
+.repo-nav-app__ai-result-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  flex-basis: auto;
+}
+
+.repo-nav-app__ai-result-path {
+  font-size: 11px;
+  color: var(--text-faint);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-nav-app__ai-result-reason {
+  width: 100%;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.repo-nav-app__ai-result-score {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+/* ── Repo Card AI description & tags ── */
+
+.repo-card__ai-description {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.repo-card__ai-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.repo-card__ai-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+/* ── Repo Nav Settings (loading) ── */
+
+.repo-nav-settings__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 32px 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.repo-nav-settings__actions {
+  margin-top: 16px;
+}
+
+/* ── General settings / Todo settings wrappers ── */
+
+.general-settings,
+.todo-settings,
+.repo-nav-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}

@@ -1,6 +1,7 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect } from 'react'
 import type { AppConfig } from '@shared/types'
 import { BUNDLED_HOLIDAY_YEARS } from '@shared/workday'
+import Section from './Section'
 
 interface ConfigModalProps {
   config: AppConfig
@@ -11,7 +12,6 @@ interface ConfigModalProps {
   loadedHolidayYears: number[]
   onFetchHolidays: (year: number) => Promise<void>
   onInstallUpdate: () => Promise<void>
-  /** Company rule: last Saturday of month is a workday. */
   companyLastSaturday: boolean
   onToggleCompanyLastSaturday: (v: boolean) => void
 }
@@ -26,20 +26,6 @@ type UpdateState =
   | { stage: 'downloading'; percent: number }
   | { stage: 'downloaded' }
   | { stage: 'error'; message: string }
-
-/** Collapsible settings section with a clickable header and chevron. */
-function Section({ title, children, defaultOpen = true }: { title: string; children: ReactNode; defaultOpen?: boolean }): JSX.Element {
-  const [open, setOpen] = useState(defaultOpen)
-  return (
-    <div className="settings-section">
-      <button type="button" className="settings-section__head" onClick={() => setOpen((v) => !v)}>
-        <span className={`settings-section__chevron ${open ? 'settings-section__chevron--open' : ''}`}>›</span>
-        {title}
-      </button>
-      {open && <div className="settings-section__body">{children}</div>}
-    </div>
-  )
-}
 
 export default function ConfigModal({
   config,
