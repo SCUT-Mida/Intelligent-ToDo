@@ -524,12 +524,10 @@ app.whenReady().then(() => {
     node: process.versions.node,
     electron: process.versions.electron
   })
-  logger.info('app', 'step 1: about to register repo nav IPC')
 
   // Register repo-navigator IPC handlers (before data handlers — ordering
   // doesn't matter for IPC, but grouping them together reads well).
   registerRepoNavIpc(ipcMain)
-  logger.info('app', 'step 2: repo nav IPC registered')
 
   // Scan external AI tool configs (opencode.json) so the renderer can offer
   // a "import from existing config" option in settings.
@@ -537,10 +535,23 @@ app.whenReady().then(() => {
 
   // Return the current log file path so the UI can show it in error messages.
   ipcMain.handle('app:getLogPath', () => logger.currentLogFilePath())
-  logger.info('app', 'step 3: misc IPC registered')
+
+  // Open the current log file in the OS default viewer (Notepad on Windows).
+  // Returns { ok, error?, path } so the UI can show a friendly message if
+  // the file doesn't exist yet or can't be opened.
+  ipcMain.handle('app:openLogFile', async (): Promise<{ ok: boolean; error?: string; path: string }> => {
+    const path = logger.currentLogFilePath()
+    if (!existsSync(path)) {
+      return { ok: false, path, error: '日志文件尚未生成（应用刚启动还没有写入日志）' }
+    }
+    const err = await shell.openPath(path)
+    if (err) {
+      return { ok: false, path, error: `打开失败：${err}` }
+    }
+    return { ok: true, path }
+  })
 
   ipcMain.handle('data:load', () => loadData())
-  logger.info('app', 'step 4: data:load registered')
   ipcMain.handle('data:save', (_e, data: AppData) => {
     saveData(data)
     return true
@@ -573,14 +584,12 @@ app.whenReady().then(() => {
   )
 
   createWindow()
-  logger.info('app', 'step 5: createWindow returned')
 
   // ---- auto-update (electron-updater) ----
   // Don't auto-download; let the user confirm in Settings. Update events are
   // forwarded to the renderer so the Settings panel can show live status.
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
-  logger.info('app', 'step 6: autoUpdater configured')
   const updaterWindow = BrowserWindow.getAllWindows()[0]
   const send = (payload: unknown): void => {
     if (updaterWindow && !updaterWindow.isDestroyed()) {

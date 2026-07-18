@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolidayData } from '../shared/types'
 import { IPC } from '../shared/repoNav'
-import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry, RepoIndex, ToolProbeResult } from '../shared/repoNav'
+import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry, RepoIndex, RepoUserData, ToolProbeResult } from '../shared/repoNav'
 import { AI_IPC } from '../shared/aiConfig'
 import type { AiConfigScanResult } from '../shared/aiConfig'
 
@@ -49,7 +49,8 @@ const api = {
   // ---- AI config discovery (scan external tool configs) ----
   scanAiConfigs: (): Promise<AiConfigScanResult> => ipcRenderer.invoke(AI_IPC.SCAN_CONFIGS),
   // ---- Application log path (for error messages / "open log folder") ----
-  getLogPath: (): Promise<string> => ipcRenderer.invoke('app:getLogPath')
+  getLogPath: (): Promise<string> => ipcRenderer.invoke('app:getLogPath'),
+  openLogFile: (): Promise<{ ok: boolean; error?: string; path: string }> => ipcRenderer.invoke('app:openLogFile')
 }
 
 try {
@@ -71,6 +72,8 @@ const repoNav = {
   pickExecutable: (): Promise<string | null> => ipcRenderer.invoke(IPC.PICK_EXECUTABLE),
   getConfigPath: (): Promise<string | null> => ipcRenderer.invoke(IPC.GET_CONFIG_PATH),
   probeTool: (kindOrBinary: string): Promise<ToolProbeResult> => ipcRenderer.invoke(IPC.PROBE_TOOL, kindOrBinary),
+  getUserData: (): Promise<RepoUserData> => ipcRenderer.invoke(IPC.GET_USER_DATA),
+  saveUserData: (data: RepoUserData): Promise<RepoUserData> => ipcRenderer.invoke(IPC.SAVE_USER_DATA, data),
   // V2 AI memory features
   getMemory: (): Promise<{ version: number; generatedAt: string; entries: Array<{ name: string; path: string; description: string | null; tags: string[]; generatedAt: string }> } | null> =>
     ipcRenderer.invoke(IPC_V2_LOCAL.REPO_GET_MEMORY),

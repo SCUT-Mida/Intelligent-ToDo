@@ -38,8 +38,16 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
   const [appStatus, setAppStatus] = useState<{ version: string; isPackaged: boolean } | null>(null)
   const [updateState, setUpdateState] = useState<UpdateState>({ stage: 'idle' })
 
+  // Log file path + open-log button state
+  const [logPathHint, setLogPathHint] = useState('加载中…')
+  const [openLogState, setOpenLogState] = useState<
+    { stage: 'idle' } | { stage: 'opening' } | { stage: 'success' } | { stage: 'error'; message: string }
+  >({ stage: 'idle' })
+
   useEffect(() => {
     setAppStatus(window.api.getAppStatus())
+    // Fetch the log file path for display.
+    window.api.getLogPath().then(setLogPathHint).catch(() => setLogPathHint('(未知)'))
     const unsub = window.api.onUpdateEvent((e) => {
       if (e.stage === 'checking') setUpdateState({ stage: 'checking' })
       else if (e.stage === 'available') setUpdateState({ stage: 'available', version: e.version, notes: e.notes })
@@ -133,6 +141,21 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
       window.api.installUpdate()
     } catch {
       setUpdateState({ stage: 'error', message: '安装前保存失败，请重试' })
+    }
+  }
+
+  const handleOpenLogFile = async (): Promise<void> => {
+    setOpenLogState({ stage: 'opening' })
+    try {
+      const result = await window.api.openLogFile()
+      if (result.ok) {
+        setOpenLogState({ stage: 'success' })
+        window.setTimeout(() => setOpenLogState({ stage: 'idle' }), 2500)
+      } else {
+        setOpenLogState({ stage: 'error', message: result.error ?? '未知错误' })
+      }
+    } catch (e) {
+      setOpenLogState({ stage: 'error', message: e instanceof Error ? e.message : String(e) })
     }
   }
   void state
@@ -301,6 +324,40 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
               ? '仅「安装版」支持自动更新。下载完成后点击安装将自动替换并重启。'
               : '当前为开发/未打包模式，自动更新不可用。'}
           </div>
+        </div>
+      </Section>
+
+      {/* 诊断 / 日志 */}
+      <Section title="诊断日志" icon="📋" label="诊断" defaultOpen={false}>
+        <div className="field">
+          <div className="field__row">
+            <div className="field__row-text">
+              应用运行日志记录所有关键操作和错误，便于排查问题。
+              <br />
+              <span className="field__hint" style={{ marginTop: 4 }}>
+                位置：<code className="inline-code">{logPathHint}</code>
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn btn--primary"
+              style={{ flexShrink: 0 }}
+              onClick={handleOpenLogFile}
+              disabled={openLogState.stage === 'opening'}
+            >
+              {openLogState.stage === 'opening' ? '打开中…' : '打开日志文件'}
+            </button>
+          </div>
+          {openLogState.stage === 'error' && (
+            <div className="field__hint field__hint--error" style={{ marginTop: 8 }}>
+              {openLogState.message}
+            </div>
+          )}
+          {openLogState.stage === 'success' && (
+            <div className="field__hint field__hint--success" style={{ marginTop: 8 }}>
+              ✓ 已在默认编辑器中打开
+            </div>
+          )}
         </div>
       </Section>
     </div>

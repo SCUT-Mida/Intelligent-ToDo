@@ -37,8 +37,8 @@ win:
     - target: portable
       arch:
         - x64
-  # 若 build/icon.ico 存在则自动使用，否则用 Electron 默认图标
-  # icon: build/icon.ico
+  # 自定义图标（build/icon.ico 由 scripts/generate-icon.mjs 生成）
+  icon: build/icon.ico
 
 # NSIS 安装程序选项
 nsis:
