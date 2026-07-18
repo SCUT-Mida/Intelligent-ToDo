@@ -9,11 +9,16 @@
  *
  * All processes are spawned detached with stdio ignored so they survive the
  * Electron app's exit.
+ *
+ * Every step is logged via the app logger so failures can be diagnosed
+ * post-mortem from <userData>/logs/app-YYYY-MM-DD.log.
  */
 
 import { spawn } from 'child_process'
 import { which } from './which'
+import type { WhichResult } from './which'
 import type { OpenRepoResult, RepoNavConfig } from '../../shared/repoNav'
+import { logger } from '../logger'
 
 /**
  * Resolve a binary name/path from config, falling back to the default.
@@ -43,35 +48,48 @@ export async function openRepoInTerminal(
   const primaryBinary = resolveBinary(config?.terminalBinary, 'wt.exe')
   const fallbackBinary = resolveBinary(config?.terminalFallback, 'powershell.exe')
 
-  try {
-    const primaryAvailable = await which(primaryBinary)
+  logger.info('launcher', 'openRepoInTerminal start', {
+    repoPath, command, mode,
+    primary: primaryBinary, fallback: fallbackBinary,
+    hasConfig: !!config
+  })
 
-    if (primaryAvailable) {
-      // Special-case: 'wt.exe' uses the encoded-command hack to avoid wt's
+  try {
+    const primary = await which(primaryBinary)
+    logger.info('launcher', 'primary lookup', { binary: primaryBinary, ok: primary.ok, path: primary.path, via: primary.via })
+
+    if (primary.ok) {
+      // Windows Terminal uses the encoded-command hack to avoid wt's
       // ';' argument splitter. Other terminals get the generic launcher path.
       if (primaryBinary.toLowerCase() === 'wt.exe') {
-        return launchWindowsTerminal(repoPath, command, mode)
+        return launchWindowsTerminal(repoPath, command, mode, primary)
       }
-      return launchGenericTerminal(primaryBinary, repoPath, command, mode)
+      return launchGenericTerminal(primaryBinary, repoPath, command, mode, primary)
     }
 
-    // Primary terminal unavailable — try fallback
-    const fallbackAvailable = await which(fallbackBinary)
-    if (fallbackAvailable) {
-      return launchPowerShellFallback(repoPath, command, fallbackBinary)
+    // Primary unavailable — try fallback
+    const fallback = await which(fallbackBinary)
+    logger.info('launcher', 'fallback lookup', { binary: fallbackBinary, ok: fallback.ok, path: fallback.path, via: fallback.via })
+
+    if (fallback.ok) {
+      return launchPowerShellFallback(repoPath, command, fallbackBinary, fallback)
     }
 
+    // Both failed — collect detailed errors for the user
+    const detail = `primary=${primaryBinary} (${primary.error}); fallback=${fallbackBinary} (${fallback.error})`
+    logger.error('launcher', 'both terminals unavailable', { detail })
     return {
       success: false,
       method: 'failed',
-      error: `Neither ${primaryBinary} nor ${fallbackBinary} found on PATH`
+      error: `找不到可用的终端程序。详情：${detail}。请查看日志：${logger.currentLogFilePath()}`
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    logger.error('launcher', 'openRepoInTerminal threw', { error: message, stack: err instanceof Error ? err.stack : undefined })
     return {
       success: false,
       method: 'failed',
-      error: message
+      error: `启动失败：${message}`
     }
   }
 }
@@ -96,8 +114,12 @@ export async function openRepoInTerminal(
 function launchWindowsTerminal(
   repoPath: string,
   command: string,
-  mode: 'new-tab' | 'new-window'
+  mode: 'new-tab' | 'new-window',
+  resolved: WhichResult
 ): OpenRepoResult {
+  // Use the resolved absolute path if we have one (more reliable than relying
+  // on spawn's PATH lookup, which may behave differently for a packaged app).
+  const binary = resolved.path ?? 'wt.exe'
   const args: string[] = []
 
   if (mode === 'new-tab') {
@@ -111,15 +133,20 @@ function launchWindowsTerminal(
   const encodedCommand = Buffer.from(command, 'utf16le').toString('base64')
   args.push('powershell', '-NoExit', '-EncodedCommand', encodedCommand)
 
-  const child = spawn('wt.exe', args, {
+  logger.info('launcher', 'spawning wt', { binary, args, mode })
+  const child = spawn(binary, args, {
     detached: true,
     stdio: 'ignore',
     windowsHide: false,
     shell: false
   })
 
+  child.on('error', (err) => {
+    logger.error('launcher', 'wt spawn error event', { error: err.message })
+  })
   child.unref()
 
+  logger.info('launcher', 'wt launched', { pid: child.pid })
   return {
     success: true,
     method: 'wt'
@@ -142,11 +169,12 @@ function launchGenericTerminal(
   binary: string,
   repoPath: string,
   command: string,
-  _mode: 'new-tab' | 'new-window'
+  _mode: 'new-tab' | 'new-window',
+  resolved: WhichResult
 ): OpenRepoResult {
-  // Many terminal emulators (WezTerm, Alacritty) accept this pattern.
-  // If a user has an unusual terminal, they can override via templates.
-  const child = spawn(binary, ['--', command], {
+  const execPath = resolved.path ?? binary
+  logger.info('launcher', 'spawning generic terminal', { binary: execPath, repoPath })
+  const child = spawn(execPath, ['--', command], {
     cwd: repoPath,
     detached: true,
     stdio: 'ignore',
@@ -154,8 +182,12 @@ function launchGenericTerminal(
     shell: false
   })
 
+  child.on('error', (err) => {
+    logger.error('launcher', 'generic terminal spawn error event', { binary: execPath, error: err.message })
+  })
   child.unref()
 
+  logger.info('launcher', 'generic terminal launched', { pid: child.pid })
   return {
     success: true,
     method: 'wt'
@@ -174,19 +206,26 @@ function launchGenericTerminal(
 function launchPowerShellFallback(
   repoPath: string,
   command: string,
-  binary: string
+  binary: string,
+  resolved: WhichResult
 ): OpenRepoResult {
+  const execPath = resolved.path ?? binary
   const psCommand = `cd "${repoPath}"; ${command}`
 
-  const child = spawn(binary, ['-NoExit', '-Command', psCommand], {
+  logger.info('launcher', 'spawning PowerShell fallback', { binary: execPath })
+  const child = spawn(execPath, ['-NoExit', '-Command', psCommand], {
     detached: true,
     stdio: 'ignore',
     windowsHide: false,
     shell: false
   })
 
+  child.on('error', (err) => {
+    logger.error('launcher', 'PowerShell spawn error event', { binary: execPath, error: err.message })
+  })
   child.unref()
 
+  logger.info('launcher', 'PowerShell launched', { pid: child.pid })
   return {
     success: true,
     method: 'powershell'

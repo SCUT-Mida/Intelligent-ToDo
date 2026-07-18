@@ -48,7 +48,9 @@ const api = {
     return () => ipcRenderer.removeListener('update:event', handler as never)
   },
   // ---- AI config discovery (scan external tool configs) ----
-  scanAiConfigs: (): Promise<AiConfigScanResult> => ipcRenderer.invoke(AI_IPC.SCAN_CONFIGS)
+  scanAiConfigs: (): Promise<AiConfigScanResult> => ipcRenderer.invoke(AI_IPC.SCAN_CONFIGS),
+  // ---- Application log path (for error messages / "open log folder") ----
+  getLogPath: (): Promise<string> => ipcRenderer.invoke('app:getLogPath')
 }
 
 try {

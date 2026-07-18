@@ -16,6 +16,7 @@ import { join, relative as pathRelative } from 'path'
 import { execFileSync } from 'child_process'
 import type { RepoIndex, RepoEntry, RepoNavConfig } from '../../shared/repoNav'
 import { dataFilePath, migrateFromLegacy } from './paths'
+import { logger } from '../logger'
 
 // ── Internal types ──────────────────────────────────────────────────────────
 
@@ -125,6 +126,11 @@ function getSubDirs(dirPath: string): string[] {
  */
 export async function scanRepos(config: RepoNavConfig): Promise<RepoIndex> {
   const startTime = Date.now()
+  logger.info('scanner', 'scan start', {
+    scanRoots: config.scanRoots,
+    scanDepth: config.scanDepth,
+    gitBinary: config.gitBinary ?? 'git'
+  })
   const repos: RepoEntry[] = []
 
   const scanRoots = Array.isArray(config.scanRoots) ? config.scanRoots : []
@@ -194,6 +200,8 @@ export async function scanRepos(config: RepoNavConfig): Promise<RepoIndex> {
 
   const generatedAt = new Date().toISOString()
   const durationMs = Date.now() - startTime
+
+  logger.info('scanner', 'scan complete', { repoCount: repos.length, durationMs })
 
   const index: RepoIndex = {
     version: 1,

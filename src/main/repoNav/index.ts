@@ -20,6 +20,7 @@ import { openRepoInTerminal } from './launcher'
 import { generateMemoryEntries, searchRepos, loadMemory, saveMemory } from './aiMemory'
 import { dataFilePath } from './paths'
 import { decryptApiKey } from '../crypto'
+import { logger } from '../logger'
 
 // ── AI config helper ───────────────────────────────────────────────────────
 
@@ -89,6 +90,7 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
 
   // ── OPEN_REPO: launch terminal for a given repo path ──────────────────
   ipc.handle(IPC.OPEN_REPO, async (_e: IpcMainInvokeEvent, repoPath: string, command: string, mode: 'new-tab' | 'new-window') => {
+    logger.info('ipc', 'OPEN_REPO', { repoPath, command, mode })
     const config = getConfig()
     return await openRepoInTerminal(repoPath, command, mode, config)
   })

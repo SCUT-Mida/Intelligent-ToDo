@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync, existsSync, renameSync } from 'fs'
 import { callLLM } from '../aiClient'
 import type { RepoEntry, RepoNavConfig, RepoMemory, RepoMemoryEntry, RankedRepoMatch } from '../../shared/repoNav'
 import { dataFilePath, migrateFromLegacy } from './paths'
+import { logger } from '../logger'
 
 // ── Path helpers ───────────────────────────────────────────────────────────
 
@@ -138,13 +139,29 @@ export async function generateMemoryEntries(
     const batch = repos.slice(i, i + batchSize)
     const batchEntries = fallbackEntries.slice(i, i + batchSize)
 
-    const systemPrompt = '你是一个代码仓库分析助手。根据提供的仓库元数据，为每个仓库生成简洁的中文描述（1-2 句话）和 3-5 个相关标签。严格以 JSON 格式返回。'
+    const systemPrompt =
+      '你是一个代码仓库分析助手。根据提供的仓库元数据（仓库名、路径、远程 URL、最近提交信息）推断该仓库的技术栈和用途，' +
+      '为每个仓库生成简洁的中文描述（1-2 句话，聚焦"这个仓库是做什么的"）和 3-8 个规范化标签。严格以 JSON 格式返回。'
 
     const metadataJson = buildRepoMetadataBatch(batch)
     const userPrompt =
       `以下是 ${batch.length} 个仓库的元数据：\n[\n${metadataJson}\n]\n\n` +
-      '请返回 JSON 数组，每项格式为 { "index": number, "description": string, "tags": string[] }。' +
-      'description 用中文简要描述该仓库的功能或用途（1-2 句话）。tags 是与该仓库相关的技术标签（如 "React", "TypeScript", "CLI" 等）。'
+      '请返回 JSON 数组，每项格式为 { "index": number, "description": string, "tags": string[] }。\n\n' +
+      '**description 要求**：\n' +
+      '- 中文，1-2 句话\n' +
+      '- 聚焦"这个仓库是做什么的"，避免空泛描述如"一个项目"\n' +
+      '- 例如："基于 React + TypeScript 的桌面待办应用，使用 Electron 打包"\n\n' +
+      '**tags 要求（重要）**：\n' +
+      '- 3-8 个标签\n' +
+      '- **统一小写、kebab-case**（连字符分隔），便于搜索匹配。如 "react"、"typescript"、"electron"、"machine-learning"、"todo-app"\n' +
+      '- 应包含以下几类：\n' +
+      '  1. **主语言/框架**：react, vue, angular, nextjs, express, fastapi, spring-boot, etc.\n' +
+      '  2. **运行时/平台**：nodejs, python, go, rust, java, browser, desktop, cli, mobile\n' +
+      '  3. **关键能力/用途**：web-app, api, microservice, library, tool, script, automation, bot, game, etc.\n' +
+      '  4. **领域/类型**（如能判断）：todo, chat, ecommerce, devops, ml, data-pipeline, etc.\n' +
+      '- **不要使用中文标签**，便于跨用户/跨语言搜索\n' +
+      '- **不要使用过于具体的标签**（如版本号、个人项目名）\n\n' +
+      '返回严格的 JSON，不要 markdown 代码块，不要多余文字。'
 
     try {
       const result = await callLLM({
@@ -182,7 +199,11 @@ export async function generateMemoryEntries(
       }
     } catch (err) {
       // Batch LLM call failed — keep batchEntries with null descriptions
-      console.error('AI memory batch failed:', err)
+      logger.error('aiMemory', 'batch LLM failed', {
+        batchIndex: i,
+        batchSize: batch.length,
+        error: err instanceof Error ? err.message : String(err)
+      })
     }
 
     results.push(...batchEntries)
@@ -192,9 +213,16 @@ export async function generateMemoryEntries(
 }
 
 /**
- * Search repos using LLM semantic ranking.
- * Returns top 3 matches with scores and Chinese reasons.
- * On parse failure or empty memory, returns [].
+ * Search repos using a hybrid approach:
+ *   1. **Exact/fast path**: If the user's query (or any whitespace-separated
+ *      token in it) matches a repo's name, tag, or path substring, return
+ *      those matches immediately with high scores. No LLM call needed — fast
+ *      and deterministic.
+ *   2. **Semantic fallback**: If no exact matches, call the LLM for natural-
+ *      language ranking. Returns top 3 matches with Chinese reasons.
+ *
+ * The fast path is what users expect when they type a tag like "react" —
+ * previously the LLM often "didn't see" the tag and returned empty results.
  */
 export async function searchRepos(
   query: string,
@@ -203,15 +231,108 @@ export async function searchRepos(
 ): Promise<RankedRepoMatch[]> {
   if (!memory.entries.length) return []
 
-  const systemPrompt = '你是代码仓库搜索助手。根据用户的自然语言查询，从仓库列表中返回最相关的 3 个。严格 JSON 格式返回。'
+  const trimmedQuery = query.trim()
+  if (!trimmedQuery) return []
+
+  // ── Step 1: Fast exact-match path ──────────────────────────────────────
+  // Lowercase the query and split into tokens so "react typescript" matches
+  // repos tagged with either.
+  const queryLower = trimmedQuery.toLowerCase()
+  const tokens = queryLower.split(/\s+/).filter((t) => t.length > 0)
+  const exactMatches: Array<{ entry: RepoMemoryEntry; score: number; reason: string; matched: string }> = []
+
+  for (const entry of memory.entries) {
+    const nameLower = entry.name.toLowerCase()
+    const pathLower = entry.path.toLowerCase()
+    const tagsLower = entry.tags.map((t) => t.toLowerCase())
+
+    let bestScore = 0
+    let bestMatch = ''
+    let bestReason = ''
+
+    // Exact tag match (strongest signal)
+    for (const tag of tagsLower) {
+      if (tag === queryLower) {
+        if (bestScore < 1.0) {
+          bestScore = 1.0
+          bestMatch = tag
+          bestReason = `标签精确匹配: "${tag}"`
+        }
+      } else if (tag.startsWith(queryLower) || queryLower.startsWith(tag)) {
+        const score = Math.min(tag.length, queryLower.length) / Math.max(tag.length, queryLower.length)
+        if (score > bestScore) {
+          bestScore = score
+          bestMatch = tag
+          bestReason = `标签前缀匹配: "${tag}"`
+        }
+      }
+    }
+
+    // Token-level tag containment (e.g. "react typescript" → tag "react" hits)
+    if (bestScore === 0) {
+      for (const token of tokens) {
+        if (token.length < 2) continue
+        for (const tag of tagsLower) {
+          if (tag.includes(token) || token.includes(tag)) {
+            const score = Math.min(token.length, tag.length) / Math.max(token.length, tag.length) * 0.85
+            if (score > bestScore) {
+              bestScore = score
+              bestMatch = tag
+              bestReason = `标签包含: "${tag}"`
+            }
+          }
+        }
+      }
+    }
+
+    // Repo name / path containment
+    if (bestScore === 0) {
+      if (nameLower.includes(queryLower) || queryLower.includes(nameLower)) {
+        bestScore = 0.9
+        bestMatch = entry.name
+        bestReason = `仓库名匹配: "${entry.name}"`
+      } else if (pathLower.includes(queryLower)) {
+        bestScore = 0.7
+        bestMatch = queryLower
+        bestReason = `路径包含: "${queryLower}"`
+      }
+    }
+
+    if (bestScore > 0) {
+      exactMatches.push({ entry, score: bestScore, reason: bestReason, matched: bestMatch })
+    }
+  }
+
+  if (exactMatches.length > 0) {
+    exactMatches.sort((a, b) => b.score - a.score)
+    logger.info('aiMemory', 'search exact-match hit', {
+      query: trimmedQuery,
+      matched: exactMatches.length,
+      top3: exactMatches.slice(0, 3).map((m) => ({ name: m.entry.name, score: m.score, matched: m.matched }))
+    })
+    return exactMatches.slice(0, 3).map((m) => ({
+      repoPath: m.entry.path,
+      repoName: m.entry.name,
+      score: m.score,
+      reason: m.reason
+    }))
+  }
+
+  // ── Step 2: Semantic fallback via LLM ──────────────────────────────────
+  logger.info('aiMemory', 'search falling back to LLM semantic', { query: trimmedQuery })
+
+  const systemPrompt =
+    '你是代码仓库搜索助手。用户用自然语言描述想找的仓库，你需要根据描述匹配最相关的仓库。' +
+    '即使描述模糊（如"我那个做 todo 的项目"）也要尽量推断。严格 JSON 格式返回。'
 
   const memoryList = buildMemoryListPrompt(memory.entries)
   const userPrompt =
-    `用户的搜索查询：${query}\n\n` +
+    `用户的搜索查询：${trimmedQuery}\n\n` +
     `仓库列表（共 ${Math.min(memory.entries.length, 200)} 个）：\n${memoryList}\n\n` +
-    '请返回 JSON 数组，每项格式为 { "index": number, "score": number, "reason": string }。' +
-    'index 对应上方仓库的序号，score 是 0-1 之间的相关性分数，reason 是用中文说明匹配原因。' +
-    '返回最相关的 3 个结果，如果没有相关结果则返回空数组 []。'
+    '请返回 JSON 数组，每项格式为 { "index": number, "score": number, "reason": string }。\n' +
+    'index 对应上方仓库的序号（0-based），score 是 0-1 之间的相关性分数，reason 是用中文说明匹配原因。\n' +
+    '返回最相关的 3 个结果。即使相关性较低，也尽量返回最接近的 3 个（用户更希望看到"近似匹配"而不是空结果）。\n' +
+    '如果没有相关结果则返回空数组 []。'
 
   try {
     const result = await callLLM({
@@ -250,7 +371,11 @@ export async function searchRepos(
     }
 
     return matches
-  } catch {
+  } catch (err) {
+    logger.error('aiMemory', 'search LLM failed', {
+      query: trimmedQuery,
+      error: err instanceof Error ? err.message : String(err)
+    })
     return []
   }
 }

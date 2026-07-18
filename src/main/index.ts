@@ -8,6 +8,7 @@ import { createDefaultData } from '../shared/types'
 import { registerRepoNavIpc } from './repoNav'
 import { scanAiConfigs } from './aiConfigScanner'
 import { AI_IPC } from '../shared/aiConfig'
+import { logger } from './logger'
 import { netFetch } from './netFetch'
 import type { NetResponse } from './netFetch'
 import { ENC_PREFIX, encryptApiKey, decryptApiKey } from './crypto'
@@ -487,15 +488,59 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  // Register global exception handlers FIRST, before any other code runs,
+  // so even errors during logger initialization get captured.
+  process.on('uncaughtException', (err) => {
+    try {
+      console.error(`[FATAL] uncaughtException: ${err.name}: ${err.message}\n${err.stack ?? ''}`)
+    } catch { /* ignore */ }
+    // Also try to write to the log file directly — logger may or may not be
+    // initialized at this point, so guard with try/catch.
+    try {
+      const { appendFileSync } = require('fs') as typeof import('fs')
+      const { join } = require('path') as typeof import('path')
+      const { app: app2 } = require('electron')
+      const logPath = join(app2.getPath('userData'), 'logs', `app-${new Date().toISOString().slice(0, 10)}.log`)
+      const line = `${new Date().toISOString()} [FATAL] [process] uncaughtException ${JSON.stringify({ name: err.name, message: err.message, stack: err.stack })}\n`
+      appendFileSync(logPath, line, 'utf-8')
+    } catch { /* nothing more we can do */ }
+  })
+  process.on('unhandledRejection', (reason) => {
+    const meta = reason instanceof Error
+      ? { name: reason.name, message: reason.message, stack: reason.stack }
+      : { reason: String(reason) }
+    try {
+      console.error(`[FATAL] unhandledRejection: ${JSON.stringify(meta)}`)
+    } catch { /* ignore */ }
+  })
+
+  // Initialize file-based logger.
+  logger.initialize()
+  logger.info('app', 'starting', {
+    version: app.getVersion(),
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    arch: process.arch,
+    node: process.versions.node,
+    electron: process.versions.electron
+  })
+  logger.info('app', 'step 1: about to register repo nav IPC')
+
   // Register repo-navigator IPC handlers (before data handlers — ordering
   // doesn't matter for IPC, but grouping them together reads well).
   registerRepoNavIpc(ipcMain)
+  logger.info('app', 'step 2: repo nav IPC registered')
 
   // Scan external AI tool configs (opencode.json) so the renderer can offer
   // a "import from existing config" option in settings.
   ipcMain.handle(AI_IPC.SCAN_CONFIGS, () => scanAiConfigs())
 
+  // Return the current log file path so the UI can show it in error messages.
+  ipcMain.handle('app:getLogPath', () => logger.currentLogFilePath())
+  logger.info('app', 'step 3: misc IPC registered')
+
   ipcMain.handle('data:load', () => loadData())
+  logger.info('app', 'step 4: data:load registered')
   ipcMain.handle('data:save', (_e, data: AppData) => {
     saveData(data)
     return true
@@ -528,12 +573,14 @@ app.whenReady().then(() => {
   )
 
   createWindow()
+  logger.info('app', 'step 5: createWindow returned')
 
   // ---- auto-update (electron-updater) ----
   // Don't auto-download; let the user confirm in Settings. Update events are
   // forwarded to the renderer so the Settings panel can show live status.
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
+  logger.info('app', 'step 6: autoUpdater configured')
   const updaterWindow = BrowserWindow.getAllWindows()[0]
   const send = (payload: unknown): void => {
     if (updaterWindow && !updaterWindow.isDestroyed()) {
@@ -596,7 +643,15 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  logger.info('app', 'window-all-closed fired', { platform: process.platform })
   if (process.platform !== 'darwin') {
+    logger.info('app', 'calling app.quit()')
     app.quit()
   }
+})
+
+process.on('exit', (code) => {
+  try {
+    console.error(`[FATAL] process exit code=${code}`)
+  } catch { /* ignore */ }
 })
