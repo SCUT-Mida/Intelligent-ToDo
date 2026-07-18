@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolidayData } from '../shared/types'
 import { IPC } from '../shared/repoNav'
-import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry } from '../shared/repoNav'
+import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry, ToolProbeResult } from '../shared/repoNav'
 
 // V2 IPC channels for AI memory features (will be moved to shared IPC_V2 when backend lands)
 const IPC_V2_LOCAL = {
@@ -61,6 +61,10 @@ const repoNav = {
     ipcRenderer.invoke(IPC.OPEN_REPO, repoPath, command, mode),
   getConfig: (): Promise<RepoNavConfig> => ipcRenderer.invoke(IPC.GET_CONFIG),
   saveConfig: (cfg: RepoNavConfig): Promise<boolean> => ipcRenderer.invoke(IPC.SAVE_CONFIG, cfg),
+  pickDirectory: (): Promise<string | null> => ipcRenderer.invoke(IPC.PICK_DIRECTORY),
+  pickExecutable: (): Promise<string | null> => ipcRenderer.invoke(IPC.PICK_EXECUTABLE),
+  getConfigPath: (): Promise<string | null> => ipcRenderer.invoke(IPC.GET_CONFIG_PATH),
+  probeTool: (kindOrBinary: string): Promise<ToolProbeResult> => ipcRenderer.invoke(IPC.PROBE_TOOL, kindOrBinary),
   // V2 AI memory features
   searchRepos: (query: string): Promise<Array<{ repoPath: string; repoName: string; score: number; reason: string }>> =>
     ipcRenderer.invoke(IPC_V2_LOCAL.REPO_SEARCH, query),

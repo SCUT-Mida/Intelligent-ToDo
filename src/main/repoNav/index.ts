@@ -5,13 +5,16 @@
  * This is the single entry point called from src/main/index.ts.
  */
 
-import { ipcMain, app } from 'electron'
+import { ipcMain, app, dialog, BrowserWindow } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import { join } from 'path'
 import { readFileSync, existsSync } from 'fs'
+import { execFileSync } from 'child_process'
 import { IPC, IPC_V2 } from '../../shared/repoNav'
-import type { RepoEntry, RepoMemory } from '../../shared/repoNav'
-import { getConfig, saveConfig } from './config'
+import type { RepoEntry, RepoMemory, ToolProbeResult } from '../../shared/repoNav'
+import { DEFAULT_TOOL_BINARIES } from '../../shared/repoNav'
+import type { ToolKind } from '../../shared/repoNav'
+import { getConfig, saveConfig, getConfigPath } from './config'
 import { scanRepos } from './scanner'
 import { openRepoInTerminal } from './launcher'
 import { generateMemoryEntries, searchRepos, loadMemory, saveMemory } from './aiMemory'
@@ -67,7 +70,8 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
 
   // ── OPEN_REPO: launch terminal for a given repo path ──────────────────
   ipc.handle(IPC.OPEN_REPO, async (_e: IpcMainInvokeEvent, repoPath: string, command: string, mode: 'new-tab' | 'new-window') => {
-    return await openRepoInTerminal(repoPath, command, mode)
+    const config = getConfig()
+    return await openRepoInTerminal(repoPath, command, mode, config)
   })
 
   // ── GET_CONFIG: return the current config ─────────────────────────────
@@ -79,6 +83,49 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
   ipc.handle(IPC.SAVE_CONFIG, (_e: IpcMainInvokeEvent, cfg: Parameters<typeof saveConfig>[0]) => {
     saveConfig(cfg)
     return true
+  })
+
+  // ── PICK_DIRECTORY: show OS folder picker, return selected path or null ─
+  ipc.handle(IPC.PICK_DIRECTORY, async (): Promise<string | null> => {
+    const win = BrowserWindow.getFocusedWindow()
+    const result = win
+      ? await dialog.showOpenDialog(win, {
+          title: '选择扫描根目录',
+          properties: ['openDirectory']
+        })
+      : await dialog.showOpenDialog({
+          title: '选择扫描根目录',
+          properties: ['openDirectory']
+        })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
+
+  // ── GET_CONFIG_PATH: return resolved config file path (for display) ────
+  ipc.handle(IPC.GET_CONFIG_PATH, (): string | null => {
+    return getConfigPath()
+  })
+
+  // ── PROBE_TOOL: verify a tool exists and runs ─────────────────────────
+  // Accepts either a ToolKind ('git' / 'terminal' / 'terminalFallback') or a
+  // raw binary name/path. Returns ok + version output + resolvedPath.
+  ipc.handle(IPC.PROBE_TOOL, async (_e: IpcMainInvokeEvent, kindOrBinary: string): Promise<ToolProbeResult> => {
+    return probeTool(kindOrBinary)
+  })
+
+  // ── PICK_EXECUTABLE: native file picker for selecting a tool binary ────
+  ipc.handle(IPC.PICK_EXECUTABLE, async (): Promise<string | null> => {
+    const win = BrowserWindow.getFocusedWindow()
+    const opts: Electron.OpenDialogOptions = {
+      title: '选择可执行文件',
+      properties: ['openFile'],
+      filters: [{ name: '可执行文件', extensions: ['exe', 'bat', 'cmd'] }]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, opts)
+      : await dialog.showOpenDialog(opts)
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
   })
 
   // ═════════════════════════════════════════════════════════════════════
@@ -137,4 +184,86 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
       return []
     }
   })
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tool probe / autodetect helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Per-kind probe arguments. The probe runs `<binary> <args...>` and treats
+ * exit code 0 as success.
+ */
+const PROBE_ARGS: Record<ToolKind, string[]> = {
+  git: ['--version'],
+  terminal: ['--version'],        // wt.exe doesn't really support this; we tolerate failure
+  terminalFallback: ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()']
+}
+
+/**
+ * Resolve the binary to probe. If `kindOrBinary` is a known ToolKind, return
+ * the user's configured override (if any) or the default. Otherwise treat it
+ * as a raw binary name/path.
+ */
+function resolveProbeBinary(kindOrBinary: string): { binary: string; kind: ToolKind | null } {
+  const config = getConfig()
+  if (kindOrBinary === 'git') {
+    return { binary: (config.gitBinary ?? '').trim() || DEFAULT_TOOL_BINARIES.git, kind: 'git' }
+  }
+  if (kindOrBinary === 'terminal') {
+    return { binary: (config.terminalBinary ?? '').trim() || DEFAULT_TOOL_BINARIES.terminal, kind: 'terminal' }
+  }
+  if (kindOrBinary === 'terminalFallback') {
+    return {
+      binary: (config.terminalFallback ?? '').trim() || DEFAULT_TOOL_BINARIES.terminalFallback,
+      kind: 'terminalFallback'
+    }
+  }
+  // Raw binary name/path passed in (no config mapping)
+  return { binary: kindOrBinary, kind: null }
+}
+
+/**
+ * Run a `--version`-style probe on the given tool. Returns the probe result.
+ * Never throws — all errors become `{ ok: false, output: <message> }`.
+ */
+function probeTool(kindOrBinary: string): ToolProbeResult {
+  const { binary, kind } = resolveProbeBinary(kindOrBinary)
+  const args = kind ? PROBE_ARGS[kind] : ['--version']
+
+  // First, resolve the absolute path via `where.exe` (informational)
+  let resolvedPath: string | undefined
+  try {
+    const whereOut = execFileSync('where', [binary], {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    })
+    resolvedPath = whereOut.split(/\r?\n/)[0]?.trim() || undefined
+  } catch {
+    // 'where' failed — binary not on PATH. Still try direct execution in case
+    // the user provided an absolute path.
+  }
+
+  try {
+    const stdout = execFileSync(binary, args, {
+      encoding: 'utf-8',
+      timeout: 10000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    })
+    return {
+      ok: true,
+      output: stdout.trim() || undefined,
+      resolvedPath
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return {
+      ok: false,
+      output: message,
+      resolvedPath
+    }
+  }
 }

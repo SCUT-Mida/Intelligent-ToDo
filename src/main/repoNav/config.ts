@@ -1,12 +1,13 @@
 /**
  * Repo Navigator configuration resolution.
  *
- * Resolution chain (matches the PS CLI version):
- *   1. $env:REPO_NAVIGATOR_CONFIG
- *   2. ~/.repo-navigator/config.json
- *   3. Copy template from <app root>/scripts/repo-nav/config.example.json
- *      (if available, then use the user copy)
- *   4. Hardcoded defaults (fallback)
+ * Resolution chain:
+ *   1. $env:REPO_NAVIGATOR_CONFIG (escape hatch for testing / PS CLI sharing)
+ *   2. <userData>/repo-nav/config.json  (primary — app data consolidated here)
+ *   3. ~/.repo-navigator/config.json    (legacy — auto-migrated to #2 on first access)
+ *   4. Template from <app root>/scripts/repo-nav/config.example.json
+ *      (copied to #2)
+ *   5. Hardcoded defaults (fallback)
  *
  * The resolved config is cached in-memory for the lifetime of the process.
  *
@@ -15,12 +16,12 @@
  * to the new CommandTemplate[] format.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'fs'
-import { join, dirname } from 'path'
-import { homedir } from 'os'
+import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'fs'
+import { join } from 'path'
 import { app } from 'electron'
 import type { RepoNavConfig } from '../../shared/repoNav'
 import { DEFAULT_TEMPLATES, migrateLegacyConfig } from '../../shared/repoNav'
+import { dataFilePath, legacyFilePath, migrateFromLegacy } from './paths'
 
 // ── Default values used when no config file exists ─────────────────────────
 
@@ -49,47 +50,41 @@ let cachedConfig: RepoNavConfig | null = null
 let cachedConfigPath: string | null = null
 
 /**
- * Returns the path to the user's config directory (~/.repo-navigator),
- * creating it if it doesn't exist.
- */
-function ensureUserConfigDir(): string {
-  const dir = join(homedir(), '.repo-navigator')
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true })
-  }
-  return dir
-}
-
-/**
- * Resolve the config file path using the same priority chain as the PS CLI.
+ * Resolve the config file path using the priority chain.
  * Returns the path string, or null if no config exists and no template is
  * available.
+ *
+ * Side effect: triggers one-time legacy migration if applicable.
  */
 export function getConfigPath(): string | null {
   if (cachedConfigPath) return cachedConfigPath
 
-  // Priority 1: Environment variable
+  // Priority 1: Environment variable (escape hatch)
   const envPath = process.env['REPO_NAVIGATOR_CONFIG']
   if (envPath && existsSync(envPath)) {
     cachedConfigPath = envPath
     return cachedConfigPath
   }
 
-  // Priority 2: User profile location
-  const userConfig = join(homedir(), '.repo-navigator', 'config.json')
-  if (existsSync(userConfig)) {
-    cachedConfigPath = userConfig
+  // Priority 2: Primary location (<userData>/repo-nav/config.json)
+  const primaryPath = dataFilePath('config.json')
+  if (existsSync(primaryPath)) {
+    cachedConfigPath = primaryPath
     return cachedConfigPath
   }
 
-  // Priority 3: Try to copy template from the app's scripts directory
+  // Priority 3: Legacy migration from ~/.repo-navigator/config.json
+  if (migrateFromLegacy('config.json')) {
+    cachedConfigPath = primaryPath
+    return cachedConfigPath
+  }
+
+  // Priority 4: Try to copy template from the app's scripts directory
   try {
     const templatePath = join(app.getAppPath(), 'scripts', 'repo-nav', 'config.example.json')
     if (existsSync(templatePath)) {
-      const userDir = ensureUserConfigDir()
-      const destPath = join(userDir, 'config.json')
-      copyFileSync(templatePath, destPath)
-      cachedConfigPath = destPath
+      copyFileSync(templatePath, primaryPath)
+      cachedConfigPath = primaryPath
       return cachedConfigPath
     }
   } catch {
@@ -136,18 +131,23 @@ export function getConfig(): RepoNavConfig {
 }
 
 /**
- * Write a new config to the user's config path and update the in-memory cache.
- * If no config path exists yet, creates one in ~/.repo-navigator/config.json.
+ * Write a new config to the resolved config path and update the in-memory cache.
+ * Always writes to the primary location (<userData>/repo-nav/config.json),
+ * even if the config was originally loaded from the env var or legacy path.
  */
 export function saveConfig(cfg: RepoNavConfig): void {
-  const userDir = ensureUserConfigDir()
-  const cfgPath = resolveConfigPath() ?? join(userDir, 'config.json')
+  const primaryPath = dataFilePath('config.json')
 
-  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf-8')
+  // If the user is currently using the env var path, respect it and write there.
+  // Otherwise always write to the primary location.
+  const envPath = process.env['REPO_NAVIGATOR_CONFIG']
+  const targetPath = envPath && existsSync(envPath) ? envPath : primaryPath
+
+  writeFileSync(targetPath, JSON.stringify(cfg, null, 2), 'utf-8')
 
   // Update both cache entries
   cachedConfig = cfg
-  cachedConfigPath = cfgPath
+  cachedConfigPath = targetPath
 }
 
 /**
@@ -156,4 +156,12 @@ export function saveConfig(cfg: RepoNavConfig): void {
 export function clearConfigCache(): void {
   cachedConfig = null
   cachedConfigPath = null
+}
+
+/**
+ * Re-export of the legacy file path helper for any external consumers
+ * (e.g. a "migrate now" UI button in the future).
+ */
+export function getLegacyConfigPath(): string {
+  return legacyFilePath('config.json')
 }

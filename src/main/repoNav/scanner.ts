@@ -11,11 +11,11 @@
  *   - Inaccessible directories are silently skipped.
  */
 
-import { readdirSync, statSync, existsSync, mkdirSync, writeFileSync } from 'fs'
+import { readdirSync, statSync, existsSync, writeFileSync } from 'fs'
 import { join, relative as pathRelative } from 'path'
-import { homedir } from 'os'
 import { execFileSync } from 'child_process'
 import type { RepoIndex, RepoEntry, RepoNavConfig } from '../../shared/repoNav'
+import { dataFilePath, migrateFromLegacy } from './paths'
 
 // ── Internal types ──────────────────────────────────────────────────────────
 
@@ -31,11 +31,15 @@ interface BfsEntry {
 // ── Git metadata helpers (all return null on failure) ──────────────────────
 
 /**
- * Run `git -C <repoPath> <args>` and return trimmed stdout, or null on failure.
+ * Run `<gitBinary> -C <repoPath> <args>` and return trimmed stdout, or null on failure.
+ *
+ * @param repoPath  Absolute path to the repository directory.
+ * @param gitBinary Binary name or absolute path (defaults to 'git').
+ * @param args      Extra args to pass to git.
  */
-function gitGet(repoPath: string, ...args: string[]): string | null {
+function gitGet(repoPath: string, gitBinary: string, ...args: string[]): string | null {
   try {
-    const stdout = execFileSync('git', ['-C', repoPath, ...args], {
+    const stdout = execFileSync(gitBinary, ['-C', repoPath, ...args], {
       encoding: 'utf-8',
       timeout: 10000,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -47,20 +51,20 @@ function gitGet(repoPath: string, ...args: string[]): string | null {
   }
 }
 
-function getRemoteUrl(repoPath: string): string | null {
-  return gitGet(repoPath, 'remote', 'get-url', 'origin')
+function getRemoteUrl(repoPath: string, gitBinary: string): string | null {
+  return gitGet(repoPath, gitBinary, 'remote', 'get-url', 'origin')
 }
 
-function getDefaultBranch(repoPath: string): string | null {
-  return gitGet(repoPath, 'rev-parse', '--abbrev-ref', 'HEAD')
+function getDefaultBranch(repoPath: string, gitBinary: string): string | null {
+  return gitGet(repoPath, gitBinary, 'rev-parse', '--abbrev-ref', 'HEAD')
 }
 
-function getLastCommitDate(repoPath: string): string | null {
-  return gitGet(repoPath, 'log', '-1', '--format=%cI')
+function getLastCommitDate(repoPath: string, gitBinary: string): string | null {
+  return gitGet(repoPath, gitBinary, 'log', '-1', '--format=%cI')
 }
 
-function getLastCommitMessage(repoPath: string): string | null {
-  return gitGet(repoPath, 'log', '-1', '--format=%s')
+function getLastCommitMessage(repoPath: string, gitBinary: string): string | null {
+  return gitGet(repoPath, gitBinary, 'log', '-1', '--format=%s')
 }
 
 // ── Directory traversal helpers ────────────────────────────────────────────
@@ -131,6 +135,9 @@ export async function scanRepos(config: RepoNavConfig): Promise<RepoIndex> {
 
   const detectedAt = new Date().toISOString()
 
+  // Resolve git binary once per scan (config.gitBinary defaults to 'git')
+  const gitBinary = config.gitBinary?.trim() || 'git'
+
   for (const root of scanRoots) {
     // Skip non-existent scan roots
     try {
@@ -165,10 +172,10 @@ export async function scanRepos(config: RepoNavConfig): Promise<RepoIndex> {
           path: current.path,
           relativePath,
           scanRoot: current.scanRoot,
-          remoteUrl: getRemoteUrl(current.path),
-          defaultBranch: getDefaultBranch(current.path),
-          lastCommitDate: getLastCommitDate(current.path),
-          lastCommitMessage: getLastCommitMessage(current.path),
+          remoteUrl: getRemoteUrl(current.path, gitBinary),
+          defaultBranch: getDefaultBranch(current.path, gitBinary),
+          lastCommitDate: getLastCommitDate(current.path, gitBinary),
+          lastCommitMessage: getLastCommitMessage(current.path, gitBinary),
           detectedAt
         }
 
@@ -196,23 +203,22 @@ export async function scanRepos(config: RepoNavConfig): Promise<RepoIndex> {
     repos
   }
 
-  // Persist the index to disk so the PS CLI can also read it
+  // Persist the index to disk so it survives restarts and can be inspected.
   persistIndex(index)
 
   return index
 }
 
 /**
- * Write the index to ~/.repo-navigator/index.json so the PS CLI and Electron
- * GUI share the same data file.
+ * Write the index to <userData>/repo-nav/index.json.
+ * Migrates from the legacy ~/.repo-navigator/ location if needed.
  */
 function persistIndex(index: RepoIndex): void {
   try {
-    const dir = join(homedir(), '.repo-navigator')
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true })
-    }
-    const indexPath = join(dir, 'index.json')
+    // Trigger one-time legacy migration (no-op if new file already exists
+    // or no legacy file is present)
+    migrateFromLegacy('index.json')
+    const indexPath = dataFilePath('index.json')
     writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf-8')
   } catch {
     // Silently continue — the in-memory index is returned to the caller

@@ -7,30 +7,21 @@
  *   - loadMemory / saveMemory / getMemoryPath: persistent storage
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs'
-import { join } from 'path'
-import { homedir } from 'os'
+import { readFileSync, writeFileSync, existsSync, renameSync } from 'fs'
 import { callLLM } from '../aiClient'
-import type { RepoEntry, RepoNavConfig, RepoMemory, RepoMemoryEntry, RankedRepoMatch, CommandTemplate } from '../../shared/repoNav'
-import { DEFAULT_TEMPLATES } from '../../shared/repoNav'
+import type { RepoEntry, RepoNavConfig, RepoMemory, RepoMemoryEntry, RankedRepoMatch } from '../../shared/repoNav'
+import { dataFilePath, migrateFromLegacy } from './paths'
 
 // ── Path helpers ───────────────────────────────────────────────────────────
 
-/** Ensure the .repo-navigator directory exists. */
-function ensureDir(): string {
-  const dir = join(homedir(), '.repo-navigator')
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true })
-  }
-  return dir
-}
-
 /**
  * Returns the path to the repo memory JSON file.
- * Same directory as index.json (~/.repo-navigator/repo-memory.json).
+ * Location: <userData>/repo-nav/repo-memory.json
+ * Triggers a one-time migration from the legacy ~/.repo-navigator/ location.
  */
 export function getMemoryPath(): string {
-  return join(ensureDir(), 'repo-memory.json')
+  migrateFromLegacy('repo-memory.json')
+  return dataFilePath('repo-memory.json')
 }
 
 // ── Persistence ────────────────────────────────────────────────────────────

@@ -10,7 +10,11 @@ export const IPC = {
   SCAN: 'repoNav:scan',
   OPEN_REPO: 'repoNav:openRepo',
   GET_CONFIG: 'repoNav:getConfig',
-  SAVE_CONFIG: 'repoNav:saveConfig'
+  SAVE_CONFIG: 'repoNav:saveConfig',
+  PICK_DIRECTORY: 'repoNav:pickDirectory',
+  PICK_EXECUTABLE: 'repoNav:pickExecutable',
+  GET_CONFIG_PATH: 'repoNav:getConfigPath',
+  PROBE_TOOL: 'repoNav:probeTool'
 } as const
 
 /**
@@ -138,6 +142,24 @@ export interface RepoNavConfig {
   autoGenerateMemory?: boolean
   /** Batch size for LLM calls. Default 5. */
   memoryBatchSize?: number
+  /**
+   * Optional override for the git executable (used by the scanner).
+   * Accepts a bare name (resolved via PATH) or an absolute path.
+   * Default: 'git'.
+   */
+  gitBinary?: string
+  /**
+   * Optional override for the primary terminal executable.
+   * Accepts a bare name (resolved via PATH) or an absolute path.
+   * Default: 'wt.exe'.
+   */
+  terminalBinary?: string
+  /**
+   * Optional override for the fallback terminal executable.
+   * Used when terminalBinary is unavailable.
+   * Default: 'powershell.exe'.
+   */
+  terminalFallback?: string
 }
 
 // ── IPC payload types ───────────────────────────────────────────────────────
@@ -157,6 +179,31 @@ export interface OpenRepoResult {
 export interface ScanResult {
   index: RepoIndex
   durationMs: number
+}
+
+// ── Tool probe / autodetect ─────────────────────────────────────────────────
+
+/**
+ * Tool kinds that can be probed or auto-detected.
+ * Used by the IPC.PROBE_TOOL channel.
+ */
+export type ToolKind = 'git' | 'terminal' | 'terminalFallback'
+
+/** Result of probing a single tool with `--version` (or equivalent). */
+export interface ToolProbeResult {
+  /** Whether the tool was found and ran successfully. */
+  ok: boolean
+  /** Trimmed version/output string on success, or stderr/error message on failure. */
+  output?: string
+  /** Absolute path resolved by `where.exe`/PATH lookup, if available. */
+  resolvedPath?: string
+}
+
+/** Default binary names for each tool kind. */
+export const DEFAULT_TOOL_BINARIES: Record<ToolKind, string> = {
+  git: 'git',
+  terminal: 'wt.exe',
+  terminalFallback: 'powershell.exe'
 }
 
 // ── Legacy config migration ─────────────────────────────────────────────────
