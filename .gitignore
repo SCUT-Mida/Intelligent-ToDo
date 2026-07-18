@@ -23,3 +23,6 @@ npm-debug.log*
 # Environment / secrets
 .env
 .env.local
+
+# TypeScript build info
+*.tsbuildinfo
