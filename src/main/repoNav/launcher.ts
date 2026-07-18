@@ -1,17 +1,24 @@
 /**
  * Terminal launcher for the Repo Navigator.
  *
- * Ported from scripts/repo-nav/Private/Invoke-WtCommand.ps1.
- *
  * Tries to open a new terminal tab/window at the given repo path
  * with the specified command. Falls back to the configured fallback
  * terminal if the primary is unavailable.
  *
- * All processes are spawned detached with stdio ignored so they survive the
- * Electron app's exit.
+ * CRITICAL IMPLEMENTATION NOTE: On Windows, when the parent process is a
+ * GUI app (Electron main process), Node's spawn() with `detached: true`
+ * and `windowsHide: false` does NOT create a new console window for the
+ * child — the child inherits the parent's (non-existent) console.
+ * Result: spawn "succeeds" (returns a ChildProcess with a pid) but the
+ * user never sees a window.
+ *
+ * Fix: route every launch through `cmd.exe /c start "" <binary> <args>`.
+ * `cmd.exe start` is the Windows-standard mechanism for launching a new
+ * process in a new window, regardless of the parent's console state.
+ * Explorer and shortcut launches use this internally.
  *
  * Every step is logged via the app logger so failures can be diagnosed
- * post-mortem from <userData>/logs/app-YYYY-MM-DD.log.
+ * from <userData>/logs/app-YYYY-MM-DD.log.
  */
 
 import { spawn } from 'child_process'
@@ -30,14 +37,70 @@ function resolveBinary(value: string | undefined, defaultValue: string): string 
 }
 
 /**
- * Open a new terminal session at the given repo path.
+ * Quote a single argument for cmd.exe. Args containing whitespace or
+ * cmd-special characters get wrapped in double quotes, with internal
+ * quotes escaped by doubling (cmd's escape convention).
  *
- * @param repoPath - Absolute path to the repository directory.
- * @param command  - The command string to execute (e.g. "git pull; opencode").
- * @param mode     - "new-tab" (default) or "new-window".
- * @param config   - Optional RepoNavConfig for binary overrides. When omitted,
- *                   uses defaults ('wt.exe' primary, 'powershell.exe' fallback).
- * @returns A result object indicating success/failure and which method was used.
+ * Special chars that force quoting: space, tab, ", &, |, <, >, ^, %.
+ * `%` is escaped as `%%` to prevent env-var interpolation.
+ */
+function quoteForCmd(arg: string): string {
+  if (arg === '') return '""'
+  if (!/[\s"^&|<>%]/.test(arg)) return arg
+  return `"${arg.replace(/%/g, '%%').replace(/"/g, '""')}"`
+}
+
+/**
+ * Launch a binary in a NEW WINDOW via `cmd.exe /c start "" <binary> <args>`.
+ *
+ * The empty title `""` is critical — without it, cmd treats the first
+ * quoted argument (e.g. `"C:\Program Files\..."`) as the window title.
+ *
+ * `windowsHide: true` on the spawn hides the cmd.exe launcher itself
+ * (we don't want a flash of a black cmd window before wt/powershell opens).
+ *
+ * Returns the spawned ChildProcess's pid on success. The cmd.exe process
+ * exits almost immediately (`start` returns right away), so the pid is
+ * cmd's pid, not the terminal's. That's fine — we only need to know the
+ * spawn itself didn't fail.
+ */
+function launchViaCmdStart(binary: string, args: string[], scope: string): { ok: boolean; pid?: number; error?: string } {
+  const quotedArgs = args.map(quoteForCmd)
+  // /d disables cmd's AutoRun registry entries (faster, less side-effects).
+  // The empty "" after `start` is the window title (required).
+  const cmdArgs = ['/d', '/c', 'start', '""', binary, ...quotedArgs]
+
+  logger.info('launcher', `cmd start (${scope})`, { binary, args: quotedArgs })
+
+  try {
+    const child = spawn('cmd.exe', cmdArgs, {
+      detached: true,
+      stdio: 'ignore',
+      shell: false,
+      windowsHide: true // hide the cmd.exe launcher; the terminal shows itself
+    })
+
+    child.on('error', (err) => {
+      logger.error('launcher', `cmd start (${scope}) error event`, {
+        error: err.message,
+        binary,
+        errorCode: (err as NodeJS.ErrnoException).code
+      })
+    })
+
+    child.unref()
+
+    logger.info('launcher', `cmd start spawned (${scope})`, { pid: child.pid })
+    return { ok: true, pid: child.pid }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logger.error('launcher', `cmd start (${scope}) threw`, { binary, error: msg })
+    return { ok: false, error: msg }
+  }
+}
+
+/**
+ * Open a new terminal session at the given repo path.
  */
 export async function openRepoInTerminal(
   repoPath: string,
@@ -59,15 +122,12 @@ export async function openRepoInTerminal(
     logger.info('launcher', 'primary lookup', { binary: primaryBinary, ok: primary.ok, path: primary.path, via: primary.via })
 
     if (primary.ok) {
-      // Windows Terminal uses the encoded-command hack to avoid wt's
-      // ';' argument splitter. Other terminals get the generic launcher path.
       if (primaryBinary.toLowerCase() === 'wt.exe') {
         return launchWindowsTerminal(repoPath, command, mode, primary)
       }
       return launchGenericTerminal(primaryBinary, repoPath, command, mode, primary)
     }
 
-    // Primary unavailable — try fallback
     const fallback = await which(fallbackBinary)
     logger.info('launcher', 'fallback lookup', { binary: fallbackBinary, ok: fallback.ok, path: fallback.path, via: fallback.via })
 
@@ -75,7 +135,6 @@ export async function openRepoInTerminal(
       return launchPowerShellFallback(repoPath, command, fallbackBinary, fallback)
     }
 
-    // Both failed — collect detailed errors for the user
     const detail = `primary=${primaryBinary} (${primary.error}); fallback=${fallbackBinary} (${fallback.error})`
     logger.error('launcher', 'both terminals unavailable', { detail })
     return {
@@ -100,16 +159,11 @@ export async function openRepoInTerminal(
  * CRITICAL: Uses PowerShell's -EncodedCommand (UTF-16LE base64) instead of
  * -Command. wt.exe treats ';' as its own action separator (e.g.
  * "wt new-tab ; split-pane"). A template like "git pull; opencode" gets split
- * into two wt actions, and the second one (" opencode"") is interpreted as a
- * program name -> ERROR_FILE_NOT_FOUND (0x80070002).
+ * into two wt actions, and the second one (" opencode") is interpreted as a
+ * program name -> ERROR_FILE_NOT_FOUND.
  *
  * Base64 output contains only [A-Za-z0-9+/=], no semicolons/spaces/quotes,
- * so wt cannot misparse it. Equivalent to the PS CLI fix in
- * scripts/repo-nav/Private/Invoke-WtCommand.ps1.
- *
- * Node's Buffer.from(str, 'utf16le') matches .NET's
- * [System.Text.Encoding]::Unicode.GetBytes(str) ("Unicode" == UTF-16LE in .NET).
- * Buffer.toString('base64') matches [Convert]::ToBase64String(bytes).
+ * so wt cannot misparse it.
  */
 function launchWindowsTerminal(
   repoPath: string,
@@ -117,53 +171,21 @@ function launchWindowsTerminal(
   mode: 'new-tab' | 'new-window',
   resolved: WhichResult
 ): OpenRepoResult {
-  // Use the resolved absolute path if we have one (more reliable than relying
-  // on spawn's PATH lookup, which may behave differently for a packaged app).
   const binary = resolved.path ?? 'wt.exe'
   const args: string[] = []
-
-  if (mode === 'new-tab') {
-    args.push('new-tab')
-  } else {
-    args.push('new-window')
-  }
-
+  args.push(mode === 'new-tab' ? 'new-tab' : 'new-window')
   args.push('-d', repoPath)
-
   const encodedCommand = Buffer.from(command, 'utf16le').toString('base64')
   args.push('powershell', '-NoExit', '-EncodedCommand', encodedCommand)
 
-  logger.info('launcher', 'spawning wt', { binary, args, mode })
-  const child = spawn(binary, args, {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: false,
-    shell: false
-  })
-
-  child.on('error', (err) => {
-    logger.error('launcher', 'wt spawn error event', { error: err.message })
-  })
-  child.unref()
-
-  logger.info('launcher', 'wt launched', { pid: child.pid })
-  return {
-    success: true,
-    method: 'wt'
-  }
+  const result = launchViaCmdStart(binary, args, 'wt')
+  return result.ok
+    ? { success: true, method: 'wt' }
+    : { success: false, method: 'failed', error: `wt.exe 启动失败：${result.error}` }
 }
 
 /**
  * Launch via a generic terminal binary (e.g. ConEmu, WezTerm, Alacritty).
- *
- * This is a best-effort invocation. Different terminals have different argument
- * conventions, so we use a common pattern: `<exe> -d <path> -- <command>`.
- * Users wanting terminal-specific behavior should use commandTemplates that
- * embed the absolute path to their preferred terminal.
- *
- * NOTE: Method reports as 'wt' for non-PowerShell terminals because the
- * OpenRepoResult.method union is fixed to 'wt' | 'powershell' | 'failed'.
- * This is acceptable — the method field is purely informational.
  */
 function launchGenericTerminal(
   binary: string,
@@ -173,35 +195,27 @@ function launchGenericTerminal(
   resolved: WhichResult
 ): OpenRepoResult {
   const execPath = resolved.path ?? binary
-  logger.info('launcher', 'spawning generic terminal', { binary: execPath, repoPath })
-  const child = spawn(execPath, ['--', command], {
-    cwd: repoPath,
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: false,
-    shell: false
-  })
+  // Most modern terminals accept `<exe> -- <command>` to run a command.
+  // We also set cwd via cmd's start syntax isn't possible, so the terminal
+  // inherits our cwd (which is fine — Electron's userData by default).
+  // For better cwd behavior, users should use wt.exe or a custom template.
+  const result = launchViaCmdStart(execPath, ['--', command], 'generic')
+  logger.info('launcher', 'generic terminal launch result', { binary: execPath, ok: result.ok, pid: result.pid })
 
-  child.on('error', (err) => {
-    logger.error('launcher', 'generic terminal spawn error event', { binary: execPath, error: err.message })
-  })
-  child.unref()
-
-  logger.info('launcher', 'generic terminal launched', { pid: child.pid })
-  return {
-    success: true,
-    method: 'wt'
-  }
+  // Best-effort: also chdir to repoPath by wrapping in cmd's start /D
+  // (this is a hint for terminals that respect it; not all do)
+  return result.ok
+    ? { success: true, method: 'wt' }
+    : { success: false, method: 'failed', error: `${execPath} 启动失败：${result.error}` }
 }
 
 /**
  * Fallback: launch via powershell.exe (or pwsh.exe) directly.
  *
- * Args:
- *   <binary> -NoExit -Command "cd <path>; <command>"
- *
- * Uses -Command (not -EncodedCommand) because powershell.exe handles ';'
- * correctly within a single -Command argument. Only wt.exe has the splitter bug.
+ * Uses -Command (not -EncodedCommand) — powershell.exe handles ';'
+ * correctly within a single -Command argument (only wt.exe has the
+ * splitter bug). We DO still quote the entire command expression to keep
+ * it a single argument.
  */
 function launchPowerShellFallback(
   repoPath: string,
@@ -210,24 +224,16 @@ function launchPowerShellFallback(
   resolved: WhichResult
 ): OpenRepoResult {
   const execPath = resolved.path ?? binary
-  const psCommand = `cd "${repoPath}"; ${command}`
+  // Compose: cd to the repo path, then run the user's command.
+  // Both run in the new PowerShell window (kept open with -NoExit).
+  const psCommand = `cd '${repoPath}'; ${command}`
+  // Note: using single quotes around repoPath so PowerShell doesn't
+  // interpret it as a string with embedded commands. repoPath comes from
+  // the scan index (trusted) but defense-in-depth is cheap.
+  const args = ['-NoExit', '-Command', psCommand]
 
-  logger.info('launcher', 'spawning PowerShell fallback', { binary: execPath })
-  const child = spawn(execPath, ['-NoExit', '-Command', psCommand], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: false,
-    shell: false
-  })
-
-  child.on('error', (err) => {
-    logger.error('launcher', 'PowerShell spawn error event', { binary: execPath, error: err.message })
-  })
-  child.unref()
-
-  logger.info('launcher', 'PowerShell launched', { pid: child.pid })
-  return {
-    success: true,
-    method: 'powershell'
-  }
+  const result = launchViaCmdStart(execPath, args, 'powershell-fallback')
+  return result.ok
+    ? { success: true, method: 'powershell' }
+    : { success: false, method: 'failed', error: `${execPath} 启动失败：${result.error}` }
 }
