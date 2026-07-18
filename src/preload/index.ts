@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolidayData } from '../shared/types'
 import { IPC } from '../shared/repoNav'
-import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry, ToolProbeResult } from '../shared/repoNav'
+import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry, RepoIndex, ToolProbeResult } from '../shared/repoNav'
 import { AI_IPC } from '../shared/aiConfig'
 import type { AiConfigScanResult } from '../shared/aiConfig'
 
@@ -61,6 +61,7 @@ try {
 
 const repoNav = {
   scan: (): Promise<ScanResult> => ipcRenderer.invoke(IPC.SCAN),
+  loadCachedIndex: (): Promise<RepoIndex | null> => ipcRenderer.invoke(IPC.LOAD_CACHED_INDEX),
   openRepo: (repoPath: string, command: string, mode: 'new-tab' | 'new-window'): Promise<OpenRepoResult> =>
     ipcRenderer.invoke(IPC.OPEN_REPO, repoPath, command, mode),
   getConfig: (): Promise<RepoNavConfig> => ipcRenderer.invoke(IPC.GET_CONFIG),

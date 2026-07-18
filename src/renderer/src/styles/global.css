@@ -2378,6 +2378,12 @@ select {
   flex-shrink: 0;
 }
 
+.repo-nav-view__cache-age {
+  color: var(--text-faint);
+  margin-left: 8px;
+  cursor: help;
+}
+
 .repo-nav-view__error {
   background: var(--danger-soft);
   color: var(--danger);

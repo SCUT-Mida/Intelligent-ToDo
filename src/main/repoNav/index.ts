@@ -11,13 +11,14 @@ import { join } from 'path'
 import { readFileSync, existsSync } from 'fs'
 import { execFileSync } from 'child_process'
 import { IPC, IPC_V2 } from '../../shared/repoNav'
-import type { RepoEntry, RepoMemory, ToolProbeResult } from '../../shared/repoNav'
+import type { RepoEntry, RepoMemory, RepoIndex, ToolProbeResult } from '../../shared/repoNav'
 import { DEFAULT_TOOL_BINARIES } from '../../shared/repoNav'
 import type { ToolKind } from '../../shared/repoNav'
 import { getConfig, saveConfig, getConfigPath } from './config'
 import { scanRepos } from './scanner'
 import { openRepoInTerminal } from './launcher'
 import { generateMemoryEntries, searchRepos, loadMemory, saveMemory } from './aiMemory'
+import { dataFilePath } from './paths'
 import { decryptApiKey } from '../crypto'
 
 // ── AI config helper ───────────────────────────────────────────────────────
@@ -65,6 +66,24 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
     return {
       index,
       durationMs: 0 // duration is calculated inside scanRepos, can refine later
+    }
+  })
+
+  // ── LOAD_CACHED_INDEX: read persisted index.json without re-scanning ──
+  // Returns the cached RepoIndex (with generatedAt timestamp) or null if no
+  // cache exists yet. Used by the renderer to display repos instantly on
+  // mount instead of triggering a full re-scan every time the user switches
+  // to the repo nav tab.
+  ipc.handle(IPC.LOAD_CACHED_INDEX, (): RepoIndex | null => {
+    try {
+      const indexPath = dataFilePath('index.json')
+      if (!existsSync(indexPath)) return null
+      const raw = readFileSync(indexPath, 'utf-8')
+      const parsed = JSON.parse(raw) as RepoIndex
+      if (parsed.version !== 1 || !Array.isArray(parsed.repos)) return null
+      return parsed
+    } catch {
+      return null
     }
   })
 

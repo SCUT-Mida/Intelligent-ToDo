@@ -8,6 +8,7 @@
 
 export const IPC = {
   SCAN: 'repoNav:scan',
+  LOAD_CACHED_INDEX: 'repoNav:loadCachedIndex',
   OPEN_REPO: 'repoNav:openRepo',
   GET_CONFIG: 'repoNav:getConfig',
   SAVE_CONFIG: 'repoNav:saveConfig',

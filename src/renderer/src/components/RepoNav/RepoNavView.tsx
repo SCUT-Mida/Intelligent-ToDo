@@ -1,13 +1,22 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import type { RepoEntry, RepoNavConfig } from '@shared/repoNav'
+import type { RepoEntry, RepoNavConfig, RepoIndex } from '@shared/repoNav'
 import RepoCard from './RepoCard'
 
 /**
  * Main Repo Navigator view.
  *
- * On mount: fetches config, then triggers a scan.
- * Manages search filter, template selection, loading/error states.
- * Settings are managed via the global UnifiedSettingsModal (ActivityBar ⚙).
+ * Mount sequence (performance fix for users with many repos):
+ *   1. Load config
+ *   2. Try to load cached index.json (instant — just reads disk)
+ *   3. If cache hit → display immediately, no spinner
+ *   4. If cache miss (first run) → fall back to a full scan
+ *
+ * Re-scans are ONLY triggered by:
+ *   - User clicking the "刷新" button
+ *   - Cache miss on first mount
+ *
+ * The cache timestamp is shown next to the refresh button so the user knows
+ * how stale the list is.
  */
 interface RepoNavViewProps {
   /** Optional map of repo path → AI memory data for display in RepoCard */
@@ -22,39 +31,43 @@ export default function RepoNavView({ memoryMap }: RepoNavViewProps): JSX.Elemen
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const [cachedAt, setCachedAt] = useState<string | null>(null)
 
-  // Load config on mount
+  // Load config on mount, then load cached index (or scan on first run)
   useEffect(() => {
-    window.repoNav
-      .getConfig()
-      .then((cfg) => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const cfg = await window.repoNav.getConfig()
+        if (cancelled) return
         setConfig(cfg)
         setSelectedTemplate(cfg.defaultTemplate ?? '')
-      })
-      .catch((e) => {
-        setError('加载配置失败: ' + (e instanceof Error ? e.message : String(e)))
-        setLoading(false)
-      })
-  }, [])
 
-  // Trigger scan when config is ready
-  useEffect(() => {
-    if (!config) return
+        // Try cached index first — instant
+        const cached = await window.repoNav.loadCachedIndex()
+        if (cancelled) return
+        if (cached && cached.repos.length > 0) {
+          setRepos(cached.repos)
+          setCachedAt(cached.generatedAt)
+          setLoading(false)
+          return
+        }
 
-    setLoading(true)
-    setError(null)
-
-    window.repoNav
-      .scan()
-      .then((result) => {
+        // Cache miss (first run or empty cache) — fall back to scan
+        setLoading(true)
+        const result = await window.repoNav.scan()
+        if (cancelled) return
         setRepos(result.index.repos)
+        setCachedAt(result.index.generatedAt)
         setLoading(false)
-      })
-      .catch((e) => {
-        setError('扫描仓库失败: ' + (e instanceof Error ? e.message : String(e)))
+      } catch (e) {
+        if (cancelled) return
+        setError('加载失败: ' + (e instanceof Error ? e.message : String(e)))
         setLoading(false)
-      })
-  }, [config])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // Filter repos by name or path (case-insensitive)
   const filteredRepos = useMemo(() => {
@@ -68,20 +81,21 @@ export default function RepoNavView({ memoryMap }: RepoNavViewProps): JSX.Elemen
     )
   }, [repos, filter])
 
-  // Handle refresh (re-scan)
+  // Handle refresh (re-scan) — only triggered manually
   const handleRefresh = useCallback(async (): Promise<void> => {
-    if (!config) return
     setLoading(true)
     setError(null)
     try {
       const result = await window.repoNav.scan()
       setRepos(result.index.repos)
+      setCachedAt(result.index.generatedAt)
+      showToast(`已刷新（${result.index.repos.length} 个仓库）`, 'success')
     } catch (e) {
       setError('扫描仓库失败: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       setLoading(false)
     }
-  }, [config])
+  }, [])
 
   // Handle opening a repo
   const handleOpen = useCallback(async (repo: RepoEntry): Promise<void> => {
@@ -154,10 +168,10 @@ export default function RepoNavView({ memoryMap }: RepoNavViewProps): JSX.Elemen
       {/* Status info */}
       {!loading && !error && config && (
         <div className="repo-nav-view__info">
-          扫描根目录: {config.scanRoots.join(', ')}
-          {repos.length > 0 && (
-            <span style={{ marginLeft: 16 }}>
-              共 {repos.length} 个仓库，筛选后 {filteredRepos.length} 个
+          共 {repos.length} 个仓库，筛选后 {filteredRepos.length} 个
+          {cachedAt && (
+            <span className="repo-nav-view__cache-age" title={cachedAt}>
+              · 最后扫描 {formatRelativeAge(cachedAt)}
             </span>
           )}
         </div>
@@ -210,4 +224,27 @@ export default function RepoNavView({ memoryMap }: RepoNavViewProps): JSX.Elemen
       )}
     </div>
   )
+}
+
+/**
+ * Format an ISO 8601 timestamp as a short Chinese relative-age string.
+ * Examples: "刚刚" / "5 分钟前" / "3 小时前" / "2 天前" / "2026-01-01"
+ */
+function formatRelativeAge(iso: string): string {
+  try {
+    const then = new Date(iso).getTime()
+    if (isNaN(then)) return iso
+    const seconds = Math.floor((Date.now() - then) / 1000)
+    if (seconds < 60) return '刚刚'
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${minutes} 分钟前`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours} 小时前`
+    const days = Math.floor(hours / 24)
+    if (days < 30) return `${days} 天前`
+    // Older than 30 days — show the date stamp
+    return new Date(iso).toISOString().slice(0, 10)
+  } catch {
+    return iso
+  }
 }
