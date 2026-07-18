@@ -6,6 +6,8 @@ import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolida
 import { getDayInfo, describeDay, WEEKDAYS_ZH, remainingWorkdays } from '../shared/workday'
 import { createDefaultData } from '../shared/types'
 import { registerRepoNavIpc } from './repoNav'
+import { scanAiConfigs } from './aiConfigScanner'
+import { AI_IPC } from '../shared/aiConfig'
 import { netFetch } from './netFetch'
 import type { NetResponse } from './netFetch'
 import { ENC_PREFIX, encryptApiKey, decryptApiKey } from './crypto'
@@ -488,6 +490,10 @@ app.whenReady().then(() => {
   // Register repo-navigator IPC handlers (before data handlers — ordering
   // doesn't matter for IPC, but grouping them together reads well).
   registerRepoNavIpc(ipcMain)
+
+  // Scan external AI tool configs (opencode.json) so the renderer can offer
+  // a "import from existing config" option in settings.
+  ipcMain.handle(AI_IPC.SCAN_CONFIGS, () => scanAiConfigs())
 
   ipcMain.handle('data:load', () => loadData())
   ipcMain.handle('data:save', (_e, data: AppData) => {

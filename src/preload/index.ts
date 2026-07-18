@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolidayData } from '../shared/types'
 import { IPC } from '../shared/repoNav'
 import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry, ToolProbeResult } from '../shared/repoNav'
+import { AI_IPC } from '../shared/aiConfig'
+import type { AiConfigScanResult } from '../shared/aiConfig'
 
 // V2 IPC channels for AI memory features (will be moved to shared IPC_V2 when backend lands)
 const IPC_V2_LOCAL = {
@@ -44,7 +46,9 @@ const api = {
     const handler = (_e: unknown, payload: UpdateEvent): void => cb(payload)
     ipcRenderer.on('update:event', handler)
     return () => ipcRenderer.removeListener('update:event', handler as never)
-  }
+  },
+  // ---- AI config discovery (scan external tool configs) ----
+  scanAiConfigs: (): Promise<AiConfigScanResult> => ipcRenderer.invoke(AI_IPC.SCAN_CONFIGS)
 }
 
 try {
