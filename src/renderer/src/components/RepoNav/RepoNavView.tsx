@@ -1,25 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import type { RepoEntry } from '@shared/repoNav'
+import type { RepoEntry, RepoNavConfig } from '@shared/repoNav'
 import RepoCard from './RepoCard'
-
-// TODO: replace with shared CommandTemplate when backend lands
-interface CommandTemplate {
-  id: string
-  label: string
-  description: string
-  command: string
-}
-
-interface RepoNavConfig {
-  '$schema'?: string
-  scanRoots: string[]
-  scanDepth: number
-  excludePatterns: string[]
-  commandTemplates: CommandTemplate[]
-  defaultTemplate: string
-  openIn: 'new-tab' | 'new-window'
-  fallbackToPowerShellExe: boolean
-}
 
 /**
  * Main Repo Navigator view.
@@ -47,9 +28,8 @@ export default function RepoNavView({ memoryMap }: RepoNavViewProps): JSX.Elemen
     window.repoNav
       .getConfig()
       .then((cfg) => {
-        const c = cfg as RepoNavConfig
-        setConfig(c)
-        setSelectedTemplate(c.defaultTemplate ?? '')
+        setConfig(cfg)
+        setSelectedTemplate(cfg.defaultTemplate ?? '')
       })
       .catch((e) => {
         setError('加载配置失败: ' + (e instanceof Error ? e.message : String(e)))

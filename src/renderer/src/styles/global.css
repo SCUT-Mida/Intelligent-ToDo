@@ -3027,3 +3027,164 @@ select {
   flex-direction: column;
   gap: 0;
 }
+
+/* ── Scan Root List ── */
+
+.scan-root-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.scan-root-list__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.scan-root-list__item:last-child {
+  border-bottom: none;
+}
+
+.scan-root-list__path {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-root-list__remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+  color: var(--text-faint);
+  border-radius: var(--radius-sm);
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.scan-root-list__remove:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.scan-root-list__empty {
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+/* ── Chip List (for exclude patterns) ── */
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: var(--text-muted);
+}
+
+.chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-faint);
+  cursor: pointer;
+  border-radius: 50%;
+  transition: color 0.15s, background 0.15s;
+}
+
+.chip__remove:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.chip-list__add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Radio Group ── */
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.radio-group__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+/* ── Repo Nav Settings footer ── */
+
+.repo-nav-settings__footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* ── Repo Nav Settings config path display ── */
+
+.repo-nav-settings__path {
+  font-size: 11px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  color: var(--text-faint);
+  word-break: break-all;
+  padding: 8px;
+  background: #f9fafb;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Tool Path rows ── */
+
+.tool-block { margin-bottom: 12px; }
+.tool-block:last-child { margin-bottom: 0; }
+
+.tool-block__label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.tool-row .input { flex: 1; }
+.tool-row__btn { flex-shrink: 0; }

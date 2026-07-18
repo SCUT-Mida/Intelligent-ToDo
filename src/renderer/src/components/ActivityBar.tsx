@@ -10,7 +10,7 @@ interface AppItem {
 }
 const APP_LIST: AppItem[] = [
   { id: 'todo', name: '智能代办', icon: '📋', description: '任务管理看板' },
-  { id: 'repoNav', name: '仓库导航', icon: '🗂', description: 'Git 仓库快速导航' }
+  { id: 'repoNav', name: '仓库导航', icon: '🧭', description: 'Git 仓库快速导航' }
 ]
 
 export default function ActivityBar(): JSX.Element {
