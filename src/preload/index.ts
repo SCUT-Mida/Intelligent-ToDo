@@ -1,5 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolidayData } from '../shared/types'
+import { IPC } from '../shared/repoNav'
+import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry } from '../shared/repoNav'
+
+// V2 IPC channels for AI memory features (will be moved to shared IPC_V2 when backend lands)
+const IPC_V2_LOCAL = {
+  REPO_SEARCH: 'repoNav:search',
+  REPO_GET_MEMORY: 'repoNav:getMemory',
+  REPO_REGENERATE_MEMORY: 'repoNav:regenerateMemory',
+  REPO_DESCRIBE_BATCH: 'repoNav:describeBatch'
+} as const
 
 /** Update lifecycle events forwarded from main's electron-updater. */
 export type UpdateEvent =
@@ -43,4 +53,30 @@ try {
   console.error(error)
 }
 
+// ── Repo Navigator API ─────────────────────────────────────────────────────
+
+const repoNav = {
+  scan: (): Promise<ScanResult> => ipcRenderer.invoke(IPC.SCAN),
+  openRepo: (repoPath: string, command: string, mode: 'new-tab' | 'new-window'): Promise<OpenRepoResult> =>
+    ipcRenderer.invoke(IPC.OPEN_REPO, repoPath, command, mode),
+  getConfig: (): Promise<RepoNavConfig> => ipcRenderer.invoke(IPC.GET_CONFIG),
+  saveConfig: (cfg: RepoNavConfig): Promise<boolean> => ipcRenderer.invoke(IPC.SAVE_CONFIG, cfg),
+  // V2 AI memory features
+  searchRepos: (query: string): Promise<Array<{ repoPath: string; repoName: string; score: number; reason: string }>> =>
+    ipcRenderer.invoke(IPC_V2_LOCAL.REPO_SEARCH, query),
+  getMemory: (): Promise<{ version: number; generatedAt: string; entries: Array<{ name: string; path: string; description: string | null; tags: string[]; generatedAt: string }> } | null> =>
+    ipcRenderer.invoke(IPC_V2_LOCAL.REPO_GET_MEMORY),
+  regenerateMemory: (): Promise<{ success: boolean; memory?: { version: number; generatedAt: string; entries: Array<{ name: string; path: string; description: string | null; tags: string[]; generatedAt: string }> }; error?: string }> =>
+    ipcRenderer.invoke(IPC_V2_LOCAL.REPO_REGENERATE_MEMORY),
+  describeBatch: (repos: RepoEntry[]): Promise<Array<{ name: string; path: string; description: string | null; tags: string[] }>> =>
+    ipcRenderer.invoke(IPC_V2_LOCAL.REPO_DESCRIBE_BATCH, repos)
+}
+
+try {
+  contextBridge.exposeInMainWorld('repoNav', repoNav)
+} catch (error) {
+  console.error(error)
+}
+
 export type Api = typeof api
+export type RepoNavApi = typeof repoNav

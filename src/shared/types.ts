@@ -181,3 +181,19 @@ export interface LoadResult {
   /** path the corrupted file was backed up to, if applicable. */
   backupPath?: string
 }
+
+// ── Multi-app collection types ───────────────────────────────────────────────
+
+export type AppId = 'todo' | 'repoNav'
+
+export interface AppManifest {
+  id: AppId
+  name: string
+  icon: string
+  description: string
+}
+
+export const APP_LIST: AppManifest[] = [
+  { id: 'todo', name: '智能代办', icon: '📋', description: '艾森豪威尔矩阵 + AI 优先级推荐' },
+  { id: 'repoNav', name: '仓库导航', icon: '🗂', description: '本地代码仓快速查找 + AI 语义搜索' },
+]
