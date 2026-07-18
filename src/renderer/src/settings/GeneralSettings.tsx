@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { AppConfig } from '@shared/types'
+import type { AiConfigScanResult, AiProviderConfig, AiProviderModel } from '@shared/aiConfig'
 import Section from '../components/Section'
 import { useAppContext } from '../store/AppContext'
 
@@ -20,8 +21,9 @@ type UpdateState =
 /**
  * General settings: AI model config + app updates.
  *
- * Note: Per-app settings (todo data export, repo-nav templates) live under
- * their respective tabs in UnifiedSettingsModal, NOT here.
+ * The AI section now offers one-click import from the user's existing
+ * opencode.json config (~/.config/opencode/opencode.json) so they don't have
+ * to re-type provider URL / API key / model name.
  */
 export default function GeneralSettings({ config, onSave }: GeneralSettingsProps): JSX.Element {
   const { state } = useAppContext()
@@ -29,6 +31,13 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
   const [apiKey, setApiKey] = useState(config.apiKey)
   const [model, setModel] = useState(config.model)
   const [showKey, setShowKey] = useState(false)
+
+  // AI config scan state
+  const [aiScan, setAiScan] = useState<AiConfigScanResult | null>(null)
+  const [aiScanLoading, setAiScanLoading] = useState(false)
+  const [aiScanError, setAiScanError] = useState<string | null>(null)
+  const [expandedProvider, setExpandedProvider] = useState<string | null>(null)
+  const [importHint, setImportHint] = useState<string | null>(null)
 
   const [appStatus, setAppStatus] = useState<{ version: string; isPackaged: boolean } | null>(null)
   const [updateState, setUpdateState] = useState<UpdateState>({ stage: 'idle' })
@@ -46,9 +55,37 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
     return unsub
   }, [])
 
+  // Auto-scan AI configs on mount (best-effort, don't block UI)
+  useEffect(() => {
+    void (async () => {
+      setAiScanLoading(true)
+      try {
+        const result = await window.api.scanAiConfigs()
+        setAiScan(result)
+      } catch (e) {
+        setAiScanError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setAiScanLoading(false)
+      }
+    })()
+  }, [])
+
   const handleSave = (): void => {
     onSave({ apiUrl: apiUrl.trim(), apiKey: apiKey.trim(), model: model.trim() })
   }
+
+  const handleImport = useCallback((provider: AiProviderConfig, modelEntry: AiProviderModel): void => {
+    if (!provider.baseURL) {
+      setImportHint(`⚠️ ${provider.displayName} 未提供 baseURL，请手动填写 API 地址`)
+      window.setTimeout(() => setImportHint(null), 4000)
+      return
+    }
+    setApiUrl(provider.baseURL)
+    setApiKey(provider.apiKey)
+    setModel(modelEntry.modelId)
+    setImportHint(`✓ 已从 ${provider.displayName} 导入：${modelEntry.displayName ?? modelEntry.modelId}`)
+    window.setTimeout(() => setImportHint(null), 4000)
+  }, [])
 
   const handleCheckUpdate = (): void => {
     setUpdateState({ stage: 'checking' })
@@ -69,10 +106,96 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
   // Suppress unused-warning for state (read inside handleInstall via state.data above)
   void state
 
+  const hasAiProviders = (aiScan?.providers?.length ?? 0) > 0
+
   return (
     <div className="general-settings">
       {/* AI 模型 */}
-      <Section title="AI 模型">
+      <Section title="AI 模型" icon="🤖" label="AI 配置">
+        {/* Import panel — shown when there are providers to import from */}
+        {(hasAiProviders || aiScanLoading || aiScanError) && (
+          <div className="ai-import-panel">
+            <div className="ai-import-panel__head">
+              <span className="ai-import-panel__title">从已有配置导入</span>
+              <span className="ai-import-panel__source">📦 opencode.json</span>
+            </div>
+            <div className="ai-import-panel__body">
+              {aiScanLoading && <div className="field__hint">正在扫描…</div>}
+              {!aiScanLoading && aiScanError && (
+                <div className="field__hint field__hint--error">扫描失败：{aiScanError}</div>
+              )}
+              {!aiScanLoading && !aiScanError && hasAiProviders && (
+                <div className="ai-import-list">
+                  {aiScan!.providers.map((provider) => {
+                    const isExpanded = expandedProvider === provider.providerId
+                    const hasModels = provider.models.length > 0
+                    return (
+                      <div key={provider.providerId} className="ai-import-provider">
+                        <button
+                          type="button"
+                          className="ai-import-provider__head"
+                          onClick={() => hasModels && setExpandedProvider(isExpanded ? null : provider.providerId)}
+                          disabled={!hasModels}
+                        >
+                          <span className={`ai-import-provider__chevron ${isExpanded ? 'ai-import-provider__chevron--open' : ''}`}>
+                            {hasModels ? '›' : '·'}
+                          </span>
+                          <span className="ai-import-provider__name">{provider.displayName}</span>
+                          {!provider.baseURL && (
+                            <span className="ai-import-provider__badge ai-import-provider__badge--warn">无 URL</span>
+                          )}
+                          {provider.baseURLInferred && (
+                            <span className="ai-import-provider__badge">URL 推断</span>
+                          )}
+                          <span className="ai-import-provider__count">
+                            {hasModels ? `${provider.models.length} 个模型` : '无模型'}
+                          </span>
+                        </button>
+                        {isExpanded && hasModels && (
+                          <div className="ai-import-models">
+                            {provider.models.map((m) => (
+                              <button
+                                key={m.modelId}
+                                type="button"
+                                className="ai-import-model"
+                                onClick={() => handleImport(provider, m)}
+                                title={provider.baseURL ? `导入 ${m.modelId}` : '该 provider 未提供 baseURL'}
+                              >
+                                <span className="ai-import-model__id">{m.displayName ?? m.modelId}</span>
+                                {m.displayName && m.displayName !== m.modelId && (
+                                  <span className="ai-import-model__raw">{m.modelId}</span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {!aiScanLoading && !aiScanError && !hasAiProviders && aiScan && (
+                <div className="field__hint">
+                  未发现可导入的 provider。配置文件路径：{aiScan.scannedPaths.join('；') || '（未找到）'}
+                </div>
+              )}
+              {aiScan && aiScan.errors.length > 0 && (
+                <div className="field__hint" style={{ marginTop: 6 }}>
+                  {aiScan.errors[0]}
+                </div>
+              )}
+            </div>
+            {importHint && (
+              <div className={`field__hint ${importHint.startsWith('✓') ? 'field__hint--success' : 'field__hint--error'}`} style={{ marginTop: 6 }}>
+                {importHint}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="settings-divider" />
+
+        {/* Manual entry fields (unchanged) */}
         <div className="field">
           <label className="field__label">API 地址 (Base URL)</label>
           <input className="input" placeholder="https://api.openai.com/v1" value={apiUrl}
@@ -81,7 +204,7 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
         </div>
         <div className="field">
           <label className="field__label">API Key</label>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="field__row">
             <input className="input" type={showKey ? 'text' : 'password'} placeholder="sk-..." value={apiKey}
               onChange={(e) => setApiKey(e.target.value)} />
             <button type="button" className="btn btn--ghost" style={{ flexShrink: 0 }}
@@ -104,7 +227,7 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
       </Section>
 
       {/* 应用更新 */}
-      <Section title="应用更新" defaultOpen={false}>
+      <Section title="应用更新" icon="🔄" label="应用" defaultOpen={false}>
         <div className="field">
           <div className="field__row">
             <div className="field__row-text">当前版本 <b>v{appStatus?.version ?? '…'}</b></div>

@@ -6,10 +6,10 @@ import RepoNavSettings from './RepoNavSettings'
 
 type SettingsTab = 'general' | 'todo' | 'repoNav'
 
-const TABS: Array<{ id: SettingsTab; label: string }> = [
-  { id: 'general', label: '通用' },
-  { id: 'todo', label: '智能代办' },
-  { id: 'repoNav', label: '仓库导航' }
+const TABS: Array<{ id: SettingsTab; label: string; icon: string }> = [
+  { id: 'general', label: '通用', icon: '⚙️' },
+  { id: 'todo', label: '智能代办', icon: '📋' },
+  { id: 'repoNav', label: '仓库导航', icon: '🧭' }
 ]
 
 /**
@@ -47,6 +47,7 @@ export default function UnifiedSettingsModal(): JSX.Element {
                 className={`unified-settings__tab ${activeTab === tab.id ? 'unified-settings__tab--active' : ''}`}
                 onClick={() => setActiveTab(tab.id)}
               >
+                <span className="unified-settings__tab-icon">{tab.icon}</span>
                 {tab.label}
               </button>
             ))}

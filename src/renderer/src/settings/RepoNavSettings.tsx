@@ -348,7 +348,7 @@ export default function RepoNavSettings(): JSX.Element {
     <div className="repo-nav-settings">
 
       {/* ─── 扫描配置 ─── */}
-      <Section title="扫描配置">
+      <Section title="扫描配置" icon="🔍" label="扫描">
         {/* 扫描根目录 */}
         <div className="field">
           <label className="field__label">扫描根目录</label>
@@ -442,7 +442,7 @@ export default function RepoNavSettings(): JSX.Element {
       </Section>
 
       {/* ─── 命令模板 ─── */}
-      <Section title="命令模板">
+      <Section title="命令模板" icon="⌨️" label="启动命令">
         {/* 命令模板表格 */}
         <div className="field">
           <label className="field__label">命令模板</label>
@@ -536,7 +536,7 @@ export default function RepoNavSettings(): JSX.Element {
       </Section>
 
       {/* ─── 启动行为 ─── */}
-      <Section title="启动行为">
+      <Section title="启动行为" icon="🚀" label="启动">
         {/* 打开方式 */}
         <div className="field">
           <label className="field__label">打开方式</label>
@@ -589,7 +589,7 @@ export default function RepoNavSettings(): JSX.Element {
       </Section>
 
       {/* ─── 工具路径 ─── */}
-      <Section title="工具路径" defaultOpen={false}>
+      <Section title="工具路径" icon="🛠️" label="高级" defaultOpen={false}>
         <div className="field">
           <label className="field__label">工具路径（可选）</label>
           <div className="field__hint" style={{ marginBottom: 12 }}>
@@ -616,7 +616,7 @@ export default function RepoNavSettings(): JSX.Element {
       </Section>
 
       {/* ─── AI 记忆 ─── */}
-      <Section title="AI 记忆" defaultOpen={false}>
+      <Section title="AI 记忆" icon="🧠" label="高级" defaultOpen={false}>
         <div className="field">
           <label className="field__row" style={{ cursor: 'pointer' }}>
             <input
@@ -656,7 +656,7 @@ export default function RepoNavSettings(): JSX.Element {
       </Section>
 
       {/* ─── 配置文件 ─── */}
-      <Section title="配置文件" defaultOpen={false}>
+      <Section title="配置文件" icon="📂" label="元信息" defaultOpen={false}>
         <div className="field">
           <label className="field__label">配置文件路径</label>
           <div className="repo-nav-settings__path">
