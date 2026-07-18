@@ -1,112 +1,53 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, net } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { join } from 'path'
-import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, rmSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
 import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolidayData } from '../shared/types'
 import { getDayInfo, describeDay, WEEKDAYS_ZH, remainingWorkdays } from '../shared/workday'
 import { createDefaultData } from '../shared/types'
+import { registerRepoNavIpc } from './repoNav'
+import { netFetch } from './netFetch'
+import type { NetResponse } from './netFetch'
+import { ENC_PREFIX, encryptApiKey, decryptApiKey } from './crypto'
+
+// ── Single-instance lock + GPU cache cleanup ───────────────────────────────
+// Prevents Windows error "Unable to move the cache: 拒绝访问 (0x5)" at startup.
+// Root causes:
+//   (a) A second app instance tries to share the same GPUCache directory.
+//   (b) A previous instance crashed and left stale lock files in GPUCache.
+// Fixes:
+//   (a) Enforce single instance — second launch focuses the existing window.
+//   (b) Wipe GPUCache before app ready; Electron recreates it cleanly.
+
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  // Another instance already holds the lock — exit silently.
+  app.quit()
+}
+
+app.on('second-instance', () => {
+  // User launched us again — focus the existing window instead of starting.
+  const wins = BrowserWindow.getAllWindows()
+  if (wins.length > 0) {
+    if (wins[0].isMinimized()) wins[0].restore()
+    wins[0].focus()
+  }
+})
+
+// Wipe stale GPU cache before app ready. GPUCache only holds shader
+// compilations and font cache — no user data lost. Electron recreates it.
+try {
+  const gpuCachePath = join(app.getPath('userData'), 'GPUCache')
+  rmSync(gpuCachePath, { recursive: true, force: true })
+} catch {
+  // Ignore — directory may not exist on first run or be inaccessible.
+}
 
 const DATA_FILE = join(app.getPath('userData'), 'todo-data.json')
 
 // ── Proxy-aware HTTP via Electron's net module ──────────────────────────────
-// Node's global `fetch` (undici) does NOT use the system proxy, so all
-// network requests fail on corporate networks. Electron's `net` module
-// goes through Chromium's network stack, which respects system proxy
-// settings automatically. This wrapper mimics the fetch API.
-
-interface NetResponse {
-  ok: boolean
-  status: number
-  json: () => Promise<unknown>
-  text: () => Promise<string>
-}
-
-function netFetch(
-  url: string,
-  options: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal } = {}
-): Promise<NetResponse> {
-  return new Promise((resolve, reject) => {
-    const request = net.request({ method: options.method ?? 'GET', url })
-
-    if (options.headers) {
-      for (const [key, value] of Object.entries(options.headers)) {
-        request.setHeader(key, value)
-      }
-    }
-
-    const onAbort = (): void => request.abort()
-    if (options.signal) {
-      if (options.signal.aborted) {
-        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }))
-        return
-      }
-      options.signal.addEventListener('abort', onAbort, { once: true })
-    }
-
-    request.on('response', (response) => {
-      const chunks: Buffer[] = []
-      response.on('data', (chunk: Buffer) => chunks.push(chunk))
-      response.on('end', () => {
-        if (options.signal) options.signal.removeEventListener('abort', onAbort)
-        const bodyStr = Buffer.concat(chunks).toString('utf-8')
-        const status = response.statusCode
-        resolve({
-          ok: status >= 200 && status < 300,
-          status,
-          json: () => Promise.resolve(JSON.parse(bodyStr)),
-          text: () => Promise.resolve(bodyStr)
-        })
-      })
-      response.on('error', (err: Error) => {
-        if (options.signal) options.signal.removeEventListener('abort', onAbort)
-        reject(err)
-      })
-    })
-
-    request.on('error', (err: Error) => {
-      if (options.signal) options.signal.removeEventListener('abort', onAbort)
-      if (options.signal?.aborted) {
-        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }))
-      } else {
-        reject(err)
-      }
-    })
-
-    if (options.body) request.write(options.body)
-    request.end()
-  })
-}
-
-const ENC_PREFIX = 'enc:'
-
-/** Encrypt an API key using OS-level safe storage (DPAPI on Windows). */
-function encryptApiKey(plain: string): string {
-  if (!plain) return ''
-  try {
-    if (safeStorage.isEncryptionAvailable()) {
-      const buf = safeStorage.encryptString(plain)
-      return ENC_PREFIX + buf.toString('base64')
-    }
-  } catch (err) {
-    console.error('safeStorage encrypt failed, falling back to plaintext:', err)
-  }
-  return plain
-}
-
-/** Decrypt an API key. Handles both encrypted ('enc:' prefixed) and legacy plaintext. */
-function decryptApiKey(stored: string): string {
-  if (!stored) return ''
-  if (stored.startsWith(ENC_PREFIX)) {
-    try {
-      const buf = Buffer.from(stored.slice(ENC_PREFIX.length), 'base64')
-      return safeStorage.decryptString(buf)
-    } catch (err) {
-      console.error('safeStorage decrypt failed:', err)
-      return ''
-    }
-  }
-  return stored
-}
+// The netFetch function is now in ./netFetch.ts, imported above.
+// The encryptApiKey/decryptApiKey functions are now in ./crypto.ts, imported above.
 
 function loadData(): LoadResult {
   // First launch — no file yet, this is a normal empty start.
@@ -515,7 +456,7 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     show: false,
     autoHideMenuBar: true,
-    title: '智能化代办',
+    title: '本地AI工具合集',
     backgroundColor: '#f5f6f8',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -544,6 +485,10 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  // Register repo-navigator IPC handlers (before data handlers — ordering
+  // doesn't matter for IPC, but grouping them together reads well).
+  registerRepoNavIpc(ipcMain)
+
   ipcMain.handle('data:load', () => loadData())
   ipcMain.handle('data:save', (_e, data: AppData) => {
     saveData(data)
