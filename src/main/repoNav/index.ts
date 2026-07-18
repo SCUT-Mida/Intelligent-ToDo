@@ -12,15 +12,17 @@ import { readFileSync, existsSync } from 'fs'
 import { execFileSync } from 'child_process'
 import { IPC, IPC_V2 } from '../../shared/repoNav'
 import type { RepoEntry, RepoMemory, RepoIndex, ToolProbeResult } from '../../shared/repoNav'
-import { DEFAULT_TOOL_BINARIES } from '../../shared/repoNav'
+import { DEFAULT_TOOL_BINARIES, classifyLlmError } from '../../shared/repoNav'
 import type { ToolKind } from '../../shared/repoNav'
 import { getConfig, saveConfig, getConfigPath } from './config'
 import { scanRepos } from './scanner'
 import { openRepoInTerminal } from './launcher'
 import { generateMemoryEntries, loadMemory, saveMemory } from './aiMemory'
+import { getUserData, saveUserData, incrementOpenCount } from './userData'
 import { dataFilePath } from './paths'
 import { decryptApiKey } from '../crypto'
 import { logger } from '../logger'
+import type { RepoUserData } from '../../shared/repoNav'
 
 // ── AI config helper ───────────────────────────────────────────────────────
 
@@ -92,7 +94,13 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
   ipc.handle(IPC.OPEN_REPO, async (_e: IpcMainInvokeEvent, repoPath: string, command: string, mode: 'new-tab' | 'new-window') => {
     logger.info('ipc', 'OPEN_REPO', { repoPath, command, mode })
     const config = getConfig()
-    return await openRepoInTerminal(repoPath, command, mode, config)
+    const result = await openRepoInTerminal(repoPath, command, mode, config)
+    // On success, bump the open counter (non-fatal if it fails — the user
+    // got their terminal either way).
+    if (result.success) {
+      incrementOpenCount(repoPath)
+    }
+    return result
   })
 
   // ── GET_CONFIG: return the current config ─────────────────────────────
@@ -125,6 +133,17 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
   // ── GET_CONFIG_PATH: return resolved config file path (for display) ────
   ipc.handle(IPC.GET_CONFIG_PATH, (): string | null => {
     return getConfigPath()
+  })
+
+  // ── GET_USER_DATA: favorites, user tags, open counts ──────────────────
+  ipc.handle(IPC.GET_USER_DATA, (): RepoUserData => {
+    return getUserData()
+  })
+
+  // ── SAVE_USER_DATA: persist full user-data (renderer is source of truth)
+  ipc.handle(IPC.SAVE_USER_DATA, (_e: IpcMainInvokeEvent, data: RepoUserData): RepoUserData => {
+    saveUserData(data)
+    return getUserData()
   })
 
   // ── PROBE_TOOL: verify a tool exists and runs ─────────────────────────
@@ -165,7 +184,20 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
       const index = await scanRepos(config)
       const aiConfig = getAIConfig()
       if (!aiConfig) {
-        return { success: false, error: '未配置 AI 模型，请先在设置中配置' }
+        return {
+          success: false,
+          error: '未配置 AI 模型',
+          errorKind: 'config' as const,
+          hint: '请到「设置 → 通用 → AI 模型」从 opencode.json 中选择一个 provider/model 组合。'
+        }
+      }
+      if (index.repos.length === 0) {
+        return {
+          success: false,
+          error: '未扫描到任何仓库',
+          errorKind: 'config' as const,
+          hint: '请先在「设置 → 仓库导航 → 扫描配置」添加扫描根目录，然后点「刷新」.'
+        }
       }
       const entries = await generateMemoryEntries(index.repos, config, aiConfig)
       const memory: RepoMemory = {
@@ -174,10 +206,20 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
         entries
       }
       saveMemory(memory)
+      logger.info('ipc', 'REGENERATE_MEMORY success', { entries: entries.length })
       return { success: true, memory }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      return { success: false, error: message }
+      const classified = classifyLlmError(err)
+      logger.error('ipc', 'REGENERATE_MEMORY failed', {
+        error: classified.message,
+        kind: classified.kind
+      })
+      return {
+        success: false,
+        error: classified.message,
+        errorKind: classified.kind,
+        hint: classified.hint
+      }
     }
   })
 

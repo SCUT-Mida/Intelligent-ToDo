@@ -15,7 +15,9 @@ export const IPC = {
   PICK_DIRECTORY: 'repoNav:pickDirectory',
   PICK_EXECUTABLE: 'repoNav:pickExecutable',
   GET_CONFIG_PATH: 'repoNav:getConfigPath',
-  PROBE_TOOL: 'repoNav:probeTool'
+  PROBE_TOOL: 'repoNav:probeTool',
+  GET_USER_DATA: 'repoNav:getUserData',
+  SAVE_USER_DATA: 'repoNav:saveUserData'
 } as const
 
 /**
@@ -181,6 +183,42 @@ export interface ScanResult {
   durationMs: number
 }
 
+// ── Per-user data (favorites, user tags, open counts) ───────────────────────
+
+/**
+ * Per-user data layered on top of the scanned RepoIndex. Stored separately
+ * from RepoNavConfig (which holds only static settings) so user behavior
+ * data persists independently of config changes.
+ *
+ * Path is the key throughout — repo paths from the RepoIndex.
+ */
+export interface RepoUserData {
+  /** Schema version (always 1 for now). */
+  version: 1
+  /** Favorite repo paths. Rendered in a dedicated "Favorites" tab. */
+  favorites: string[]
+  /** User-defined tags per repo path. Layered ON TOP of AI-generated tags. */
+  userTags: Record<string, string[]>
+  /** Open count per repo path. Drives sorting (popular first). */
+  openCounts: Record<string, number>
+  /** ISO timestamp of last open per repo path (secondary sort key). */
+  lastOpenedAt: Record<string, string>
+  /** ISO timestamp when this file was last saved. */
+  updatedAt: string
+}
+
+/** Factory for a fresh RepoUserData (used on first run). */
+export function createDefaultUserData(): RepoUserData {
+  return {
+    version: 1,
+    favorites: [],
+    userTags: {},
+    openCounts: {},
+    lastOpenedAt: {},
+    updatedAt: new Date().toISOString()
+  }
+}
+
 // ── Tool probe / autodetect ─────────────────────────────────────────────────
 
 /**
@@ -197,6 +235,85 @@ export interface ToolProbeResult {
   output?: string
   /** Absolute path resolved by `where.exe`/PATH lookup, if available. */
   resolvedPath?: string
+}
+
+// ── AI operation result ─────────────────────────────────────────────────────
+
+/**
+ * Structured result of an AI-backend operation (memory generation, etc).
+ * When `success` is false, `error` is a short technical message AND `hint`
+ * is a longer, user-facing suggestion for how to fix it (display in UI).
+ */
+export interface AiOperationResult<T> {
+  success: boolean
+  data?: T
+  /** Short technical error message (English-or-Chinese mixed). */
+  error?: string
+  /** Categorized error kind for UI styling / routing. */
+  errorKind?: 'auth' | 'not-found' | 'network' | 'timeout' | 'config' | 'unknown'
+  /** Longer user-facing hint with suggested actions (Chinese). */
+  hint?: string
+}
+
+/**
+ * Classify a thrown error from an LLM call into a structured { kind, hint }.
+ * Used by all AI IPC handlers to give actionable error messages.
+ */
+export function classifyLlmError(err: unknown): { kind: AiOperationResult<unknown>['errorKind']; hint: string; message: string } {
+  const message = err instanceof Error ? err.message : String(err)
+  const lower = message.toLowerCase()
+
+  // Auth failures
+  if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid api key') || lower.includes('invalid_api_key')) {
+    return {
+      kind: 'auth',
+      message,
+      hint: 'API Key 不正确或已失效。请到「设置 → 通用 → AI 模型」检查当前选中的 provider，确保其 API Key 有效。'
+    }
+  }
+
+  // Model not found / wrong endpoint
+  if (lower.includes('404') || lower.includes('not found') || lower.includes('model not found')) {
+    return {
+      kind: 'not-found',
+      message,
+      hint: 'API 地址或模型名不正确。可能是 provider 改了 baseURL 或下线了该模型。请重新选择模型或检查 opencode.json 配置。'
+    }
+  }
+
+  // Timeout / abort
+  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('abort') || lower.includes('timeoutms')) {
+    return {
+      kind: 'timeout',
+      message,
+      hint: '请求超时（60 秒未响应）。可能是网络较慢或服务端繁忙。建议稍后重试；如果仓库较多，可以在「设置 → 仓库导航 → AI 记忆」调小批量大小。'
+    }
+  }
+
+  // Network / connection refused
+  if (lower.includes('enotfound') || lower.includes('econnrefused') || lower.includes('econnreset') || lower.includes('fetch failed') || lower.includes('network')) {
+    return {
+      kind: 'network',
+      message,
+      hint: '无法连接到 API 服务。请检查：1) 网络是否正常；2) 是否需要 VPN/代理；3) API 地址是否正确。'
+    }
+  }
+
+  // Rate limit
+  if (lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests')) {
+    return {
+      kind: 'network',
+      message,
+      hint: 'API 调用频次超限（429 Rate Limited）。请稍后重试，或在「设置 → 仓库导航 → AI 记忆」调小批量大小。'
+    }
+  }
+
+  // Generic
+  return {
+    kind: 'unknown',
+    message,
+    hint: 'AI 调用失败。请查看日志（设置 → 通用 → 诊断日志）了解详情，或稍后重试。'
+  }
 }
 
 /** Default binary names for each tool kind. */
