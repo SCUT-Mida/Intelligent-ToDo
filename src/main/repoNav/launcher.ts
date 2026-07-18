@@ -212,10 +212,15 @@ function launchGenericTerminal(
 /**
  * Fallback: launch via powershell.exe (or pwsh.exe) directly.
  *
- * Uses -Command (not -EncodedCommand) — powershell.exe handles ';'
- * correctly within a single -Command argument (only wt.exe has the
- * splitter bug). We DO still quote the entire command expression to keep
- * it a single argument.
+ * Uses -EncodedCommand (UTF-16LE base64) instead of -Command. This is
+ * CRITICAL when going through `cmd.exe start`: cmd's quote parser mangles
+ * complex -Command strings that contain semicolons and inner quotes —
+ * the inner commands get split or eaten, and PowerShell ends up running
+ * in interactive mode in the cmd's working directory.
+ *
+ * Base64 contains only [A-Za-z0-9+/=], no shell-special characters at all,
+ * so it passes through cmd → PowerShell verbatim. Same fix the wt.exe path
+ * uses for the same reason.
  */
 function launchPowerShellFallback(
   repoPath: string,
@@ -224,13 +229,12 @@ function launchPowerShellFallback(
   resolved: WhichResult
 ): OpenRepoResult {
   const execPath = resolved.path ?? binary
-  // Compose: cd to the repo path, then run the user's command.
-  // Both run in the new PowerShell window (kept open with -NoExit).
-  const psCommand = `cd '${repoPath}'; ${command}`
-  // Note: using single quotes around repoPath so PowerShell doesn't
-  // interpret it as a string with embedded commands. repoPath comes from
-  // the scan index (trusted) but defense-in-depth is cheap.
-  const args = ['-NoExit', '-Command', psCommand]
+  // Compose the PowerShell script: cd to repo, then run the user's command.
+  // Use Set-Location -LiteralPath so paths with special chars ($, [, etc.)
+  // are not interpreted by PowerShell.
+  const psScript = `Set-Location -LiteralPath '${repoPath.replace(/'/g, "''")}'; ${command}`
+  const encoded = Buffer.from(psScript, 'utf16le').toString('base64')
+  const args = ['-NoExit', '-EncodedCommand', encoded]
 
   const result = launchViaCmdStart(execPath, args, 'powershell-fallback')
   return result.ok
