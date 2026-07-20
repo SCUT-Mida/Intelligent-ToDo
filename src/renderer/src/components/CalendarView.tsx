@@ -44,20 +44,27 @@ export default function CalendarView({ tasks, onToggle, onEdit, holidayOverrides
   const [viewYear, setViewYear] = useState(now.getFullYear())
   const [viewMonth, setViewMonth] = useState(now.getMonth()) // 0-11
   const [selectedDate, setSelectedDate] = useState<string>(todayStr())
+  // Hide-completed toggle (default ON = hide completed tasks from the grid
+  // and the selected-day list). Stats panel still reflects the full set so
+  // the user can see overall progress.
+  const [hideCompleted, setHideCompleted] = useState(true)
 
   const grid = useMemo(() => buildMonthGrid(viewYear, viewMonth), [viewYear, viewMonth])
 
-  // tasks grouped by due date for quick lookup
+  // Filter for display: completed tasks are hidden when toggle is on.
+  const displayTasks = hideCompleted ? tasks.filter((t) => !t.completed) : tasks
+
+  // tasks grouped by due date for quick lookup (uses displayTasks, not all tasks)
   const tasksByDate = useMemo(() => {
     const m = new Map<string, Task[]>()
-    for (const t of tasks) {
+    for (const t of displayTasks) {
       if (!t.dueDate) continue
       const arr = m.get(t.dueDate) ?? []
       arr.push(t)
       m.set(t.dueDate, arr)
     }
     return m
-  }, [tasks])
+  }, [displayTasks])
 
   // statistics
   const stats = useMemo(() => {
@@ -126,6 +133,19 @@ export default function CalendarView({ tasks, onToggle, onEdit, holidayOverrides
           >
             今天
           </button>
+          <label className="hide-completed-toggle calendar-hide-completed">
+            <input
+              type="checkbox"
+              checked={hideCompleted}
+              onChange={(e) => setHideCompleted(e.target.checked)}
+            />
+            <span>隐藏已完成</span>
+            {hideCompleted && tasks.some((t) => t.completed) && (
+              <span className="hide-completed-toggle__count">
+                （{tasks.filter((t) => t.completed).length} 个）
+              </span>
+            )}
+          </label>
         </div>
 
         <div className="calendar-grid">

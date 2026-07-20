@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Task, Quadrant } from '@shared/types'
 import { QUADRANTS } from '@shared/types'
 import { formatRecurrence } from '@shared/recurrence'
@@ -54,12 +55,40 @@ export default function QuadrantBoard({
   onAddTask,
   compact = false
 }: QuadrantBoardProps): JSX.Element {
+  // Hide-completed toggle (per-board, default ON = hide completed).
+  // Compact mode (used by TodayPriorityView sidebar) always shows everything
+  // because the priority view already filters by its own logic.
+  const [hideCompleted, setHideCompleted] = useState(true)
   const containerClass = compact ? 'quadrant-board quadrant-board--compact' : 'board'
 
+  // Pre-filter: drop completed tasks when hideCompleted is on. Counts in
+  // headers reflect the visible set so the user sees consistent numbers.
+  const visibleTasks = compact ? tasks : (hideCompleted ? tasks.filter((t) => !t.completed) : tasks)
+
   return (
-    <div className={containerClass}>
+    <div className="quadrant-board-wrap">
+      {/* Toolbar with toggle — hidden in compact mode (priority view sidebar) */}
+      {!compact && (
+        <div className="quadrant-board-toolbar">
+          <label className="hide-completed-toggle">
+            <input
+              type="checkbox"
+              checked={hideCompleted}
+              onChange={(e) => setHideCompleted(e.target.checked)}
+            />
+            <span>隐藏已完成任务</span>
+            {hideCompleted && tasks.some((t) => t.completed) && (
+              <span className="hide-completed-toggle__count">
+                （{tasks.filter((t) => t.completed).length} 个已隐藏）
+              </span>
+            )}
+          </label>
+        </div>
+      )}
+
+      <div className={containerClass}>
       {QUADRANTS.map((q) => {
-        const list = tasks
+        const list = visibleTasks
           .filter((t) => t.quadrant === q.id)
           .sort((a, b) => {
             if (a.completed !== b.completed) return a.completed ? 1 : -1
@@ -156,6 +185,7 @@ export default function QuadrantBoard({
           </section>
         )
       })}
+      </div>
     </div>
   )
 }
