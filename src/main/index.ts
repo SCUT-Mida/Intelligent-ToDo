@@ -181,10 +181,15 @@ async function aiRecommend(
     throw new Error('当前没有待办任务，请先添加任务后再使用 AI 智能分配')
   }
 
+  logger.info('aiRecommend', 'analysis starting', {
+    totalTasks: tasks.length,
+    incompleteTasks: incomplete.length,
+    model: config.model,
+    apiUrl: baseUrl
+  })
+
   const today = new Date()
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-  // Today's workday status, so the AI knows whether today is a working day,
-  // a holiday, a 调休补班, or the company's last-Saturday workday.
   const todayInfo = getDayInfo(today, holidayOverrides, opts)
   const todayDesc = `${todayStr} ${WEEKDAYS_ZH[today.getDay()]}（${describeDay(todayInfo)}）`
 
@@ -194,6 +199,19 @@ async function aiRecommend(
     q3: '不重要·紧急',
     q4: '不重要·不紧急'
   }
+
+  // Log quadrant + due-date distribution so we can diagnose "why wasn't my
+  // task recommended" from the log file.
+  const dueToday = incomplete.filter((t) => t.dueDate === todayStr)
+  logger.info('aiRecommend', 'task distribution', {
+    q1: incomplete.filter((t) => t.quadrant === 'q1').length,
+    q2: incomplete.filter((t) => t.quadrant === 'q2').length,
+    q3: incomplete.filter((t) => t.quadrant === 'q3').length,
+    q4: incomplete.filter((t) => t.quadrant === 'q4').length,
+    dueToday: dueToday.length,
+    dueTodayIds: dueToday.map((t) => t.id),
+    noDue: incomplete.filter((t) => !t.dueDate).length
+  })
 
   const taskList = incomplete
     .map((t, i) => {
@@ -224,6 +242,11 @@ async function aiRecommend(
     `以下是我的未完成待办任务列表（含进度与截止信息）：\n\n${taskList}\n\n` +
     '请综合四象限法则、任务进度、截止日期与剩余工作日，推荐我今日应该优先完成的 3-5 个任务，并按优先级从高到低排序。\n' +
     '进度越低的任务通常越需要尽快推进；接近完成（75%+）的任务可优先收尾。\n\n' +
+    '**特别重要 — 截止日期优先原则**：\n' +
+    '- 四象限中的"紧急/不紧急"是分类参考，不是绝对规则。\n' +
+    '- **任何截止日期是今天的任务（无论属于哪个象限）都已事实上变得紧急**，必须出现在推荐列表中。\n' +
+    '- 即使某任务被标记为"重要·不紧急"（Q2），如果其截止日期是今天，它应该被视为最高优先级。\n' +
+    '- 截止日期是今天但剩余工作日为 0 的任务，必须在推荐中明确标注"今天必须完成"。\n\n' +
     '推荐理由格式规范（必须严格遵守）：\n' +
     '  有截止日期：「截止日期是 yyyy-mm-dd 周x（剩余 N 工作日）— 其他理由说明」\n' +
     '  无截止日期：「无截止日期 — 其他理由说明」\n' +
@@ -262,14 +285,22 @@ async function aiRecommend(
   } catch (fetchErr) {
     clearTimeout(timeout)
     if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+      logger.error('aiRecommend', 'request timeout (60s)')
       throw new Error('AI 请求超时（60 秒未响应），请检查网络或更换模型。')
     }
+    logger.error('aiRecommend', 'fetch failed', {
+      error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
+    })
     throw new Error(`AI 请求失败：${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`)
   }
   clearTimeout(timeout)
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')
+    logger.error('aiRecommend', 'API returned error', {
+      status: resp.status,
+      body: text.slice(0, 200)
+    })
     throw new Error(`AI 请求失败 (${resp.status}): ${text.slice(0, 300)}`)
   }
 
@@ -285,6 +316,11 @@ async function aiRecommend(
   const validTaskIds = new Set(incomplete.map((t) => t.id))
   const parsed = extractJson(content)
 
+  logger.info('aiRecommend', 'LLM raw response (truncated)', {
+    length: content.length,
+    preview: content.slice(0, 500)
+  })
+
   if (
     parsed &&
     typeof parsed === 'object' &&
@@ -294,7 +330,8 @@ async function aiRecommend(
       items?: Array<{ taskId?: unknown; reason?: unknown }>
       summary?: unknown
     }
-    const items = (obj.items ?? [])
+    const rawItems = obj.items ?? []
+    const items = rawItems
       .filter(
         (it) =>
           it &&
@@ -312,6 +349,20 @@ async function aiRecommend(
       typeof obj.summary === 'string' && obj.summary.trim()
         ? obj.summary.trim()
         : ''
+
+    // Log the parse outcome: what the LLM returned vs what we kept.
+    const returnedIds = rawItems.map((it) => (it as { taskId?: unknown }).taskId).filter(Boolean)
+    const droppedIds = returnedIds.filter((id) => !validTaskIds.has(id as string))
+    const missingDueToday = dueToday.filter((t) => !items.some((it) => it.taskId === t.id))
+    logger.info('aiRecommend', 'parse result', {
+      rawItemCount: rawItems.length,
+      keptItemCount: items.length,
+      returnedIds,
+      droppedInvalidIds: droppedIds,
+      dueTodayMissing: missingDueToday.map((t) => ({ id: t.id, content: t.content.slice(0, 40) })),
+      summary: summary.slice(0, 100)
+    })
+
     return {
       items,
       summary: summary || '今日优先任务已生成，请按推荐顺序执行。',
@@ -319,6 +370,7 @@ async function aiRecommend(
     }
   }
 
+  logger.warn('aiRecommend', 'LLM response not valid JSON, falling back to raw text')
   // Fallback: AI didn't return valid JSON. Surface raw text as the summary.
   return {
     items: [],
@@ -556,15 +608,30 @@ app.whenReady().then(() => {
     saveData(data)
     return true
   })
+  // Run the AI analysis and return the structured result. Errors are thrown
+  // to the renderer which shows them in the UI. We also log the outcome.
   ipcMain.handle(
     'ai:recommend',
-    (
+    async (
       _e,
       tasks: Task[],
       config: AppConfig,
       holidayOverrides?: Record<number, YearHolidayData>,
       opts?: { companyLastSaturday?: boolean }
-    ) => aiRecommend(tasks, config, holidayOverrides, opts)
+    ) => {
+      try {
+        const result = await aiRecommend(tasks, config, holidayOverrides, opts)
+        logger.info('aiRecommend', 'completed successfully', {
+          itemsReturned: result.items.length
+        })
+        return result
+      } catch (err) {
+        logger.error('aiRecommend', 'failed', {
+          error: err instanceof Error ? err.message : String(err)
+        })
+        throw err
+      }
+    }
   )
   ipcMain.handle('holidays:fetch', (_e, year: number) => fetchHolidays(year))
   ipcMain.handle(
