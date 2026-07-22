@@ -3744,3 +3744,64 @@ select {
 .manual-config-grid .field:last-child {
   grid-column: 1 / -1;
 }
+
+/* ── Command config rows (reusable individual commands) ── */
+
+.cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.cmd-row__name {
+  width: 130px;
+  flex-shrink: 0;
+  font-size: 12.5px;
+}
+
+.cmd-row__cmd {
+  flex: 1;
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px;
+}
+
+/* ── Template card: name field (replaces old label/id) ── */
+
+.tpl-card__name {
+  width: 110px;
+  flex-shrink: 0;
+}
+
+/* ── Template step: command reference display ── */
+
+.tpl-step__name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.tpl-step__raw {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Add command to template via dropdown ── */
+
+.tpl-add-cmd {
+  margin-top: 6px;
+}
+
+.tpl-add-cmd__select {
+  width: 100%;
+  max-width: 280px;
+  font-size: 12px;
+  padding: 4px 8px;
+}
