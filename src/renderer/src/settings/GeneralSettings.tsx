@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import type { AppConfig } from '@shared/types'
+import type { AppConfig, SavedAiConfig } from '@shared/types'
 import type { AiConfigScanResult, AiProviderConfig, AiProviderModel } from '@shared/aiConfig'
 import Section from '../components/Section'
 import { useAppContext } from '../store/AppContext'
@@ -28,7 +28,7 @@ type UpdateState =
  * to set one up (rather than forcing them to type URL/Key/Model by hand).
  */
 export default function GeneralSettings({ config, onSave }: GeneralSettingsProps): JSX.Element {
-  const { state } = useAppContext()
+  const { state, dispatch } = useAppContext()
   const [aiScan, setAiScan] = useState<AiConfigScanResult | null>(null)
   const [aiScanLoading, setAiScanLoading] = useState(false)
   const [aiScanError, setAiScanError] = useState<string | null>(null)
@@ -36,11 +36,13 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
   const [selectHint, setSelectHint] = useState<string | null>(null)
 
   // Manual config fields (fallback when opencode.json isn't available)
-  const [manualUrl, setManualUrl] = useState(config.apiUrl)
-  const [manualKey, setManualKey] = useState(config.apiKey)
-  const [manualModel, setManualModel] = useState(config.model)
-  const [showManualKey, setShowManualKey] = useState(false)
-  const [manualHint, setManualHint] = useState<string | null>(null)
+  // New config form state (for adding a saved profile)
+  const [newName, setNewName] = useState('')
+  const [newUrl, setNewUrl] = useState('')
+  const [newKey, setNewKey] = useState('')
+  const [newModel, setNewModel] = useState('')
+  const [showNewKey, setShowNewKey] = useState(false)
+  const [configHint, setConfigHint] = useState<string | null>(null)
 
   const [appStatus, setAppStatus] = useState<{ version: string; isPackaged: boolean } | null>(null)
   const [updateState, setUpdateState] = useState<UpdateState>({ stage: 'idle' })
@@ -117,10 +119,11 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
       apiKey: provider.apiKey,
       model: modelEntry.modelId
     })
-    // Sync manual fields too so they stay consistent
-    setManualUrl(provider.baseURL)
-    setManualKey(provider.apiKey)
-    setManualModel(modelEntry.modelId)
+    // Clear the new-config form (if user was typing) since they picked an existing one
+    setNewUrl('')
+    setNewKey('')
+    setNewModel('')
+    setNewName('')
 
     setSelectHint(`✓ 已切换到 ${provider.displayName} / ${modelEntry.displayName ?? modelEntry.modelId}`)
     window.setTimeout(() => setSelectHint(null), 3000)
@@ -156,19 +159,52 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
     }
   }
 
-  const handleManualSave = useCallback((): void => {
-    const url = manualUrl.trim()
-    const key = manualKey.trim()
-    const model = manualModel.trim()
+  const savedConfigs: SavedAiConfig[] = state.data.savedAiConfigs ?? []
+
+  const isConfigActive = useCallback((saved: SavedAiConfig): boolean => {
+    return config.apiUrl === saved.apiUrl &&
+      config.apiKey === saved.apiKey &&
+      config.model === saved.model
+  }, [config])
+
+  const handleAddConfig = useCallback((): void => {
+    const name = newName.trim()
+    const url = newUrl.trim()
+    const model = newModel.trim()
     if (!url || !model) {
-      setManualHint('⚠️ API 地址和模型名称不能为空')
-      window.setTimeout(() => setManualHint(null), 4000)
+      setConfigHint('⚠️ API 地址和模型名称不能为空')
+      window.setTimeout(() => setConfigHint(null), 4000)
       return
     }
-    onSave({ apiUrl: url, apiKey: key, model })
-    setManualHint('✓ 手动配置已保存')
-    window.setTimeout(() => setManualHint(null), 3000)
-  }, [manualUrl, manualKey, manualModel, onSave])
+    const newConfig: SavedAiConfig = {
+      id: `ai-${Date.now()}`,
+      name: name || model,
+      apiUrl: url,
+      apiKey: newKey.trim(),
+      model
+    }
+    // Save to AppData + set as active
+    dispatch({ type: 'SET_DATA', payload: { ...state.data, savedAiConfigs: [...savedConfigs, newConfig] } })
+    onSave({ apiUrl: url, apiKey: newKey.trim(), model })
+    // Clear form
+    setNewName('')
+    setNewUrl('')
+    setNewKey('')
+    setNewModel('')
+    setConfigHint(`✓ 已保存并切换到「${newConfig.name}」`)
+    window.setTimeout(() => setConfigHint(null), 3000)
+  }, [newName, newUrl, newKey, newModel, savedConfigs, state.data, dispatch, onSave])
+
+  const handleSelectConfig = useCallback((saved: SavedAiConfig): void => {
+    if (isConfigActive(saved)) return
+    onSave({ apiUrl: saved.apiUrl, apiKey: saved.apiKey, model: saved.model })
+    setConfigHint(`✓ 已切换到「${saved.name}」`)
+    window.setTimeout(() => setConfigHint(null), 3000)
+  }, [isConfigActive, onSave])
+
+  const handleDeleteConfig = useCallback((id: string): void => {
+    dispatch({ type: 'SET_DATA', payload: { ...state.data, savedAiConfigs: savedConfigs.filter((c) => c.id !== id) } })
+  }, [savedConfigs, state.data, dispatch])
 
   const handleOpenLogFile = async (): Promise<void> => {    setOpenLogState({ stage: 'opening' })
     try {
@@ -302,42 +338,66 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
           )}
         </div>
 
-        {/* Manual config fallback */}
+        {/* Saved configs list + add new */}
         <div className="settings-divider" />
         <div className="field">
-          <label className="field__label">或者手动配置</label>
-          <div className="field__hint" style={{ marginBottom: 10 }}>
-            如果没有使用 opencode.json，可在此手动填写 API 信息。
-          </div>
-          <div className="manual-config-grid">
-            <div className="field">
-              <label className="field__label">API 地址 (Base URL)</label>
-              <input className="input" placeholder="https://api.openai.com/v1" value={manualUrl}
-                onChange={(e) => setManualUrl(e.target.value)} />
+          <label className="field__label">已保存的配置</label>
+
+          {/* List of saved configs */}
+          {savedConfigs.length > 0 ? (
+            <div className="saved-config-list">
+              {savedConfigs.map((saved) => {
+                const active = isConfigActive(saved)
+                return (
+                  <div key={saved.id} className={`saved-config ${active ? 'saved-config--active' : ''}`}>
+                    <button
+                      type="button"
+                      className="saved-config__main"
+                      onClick={() => handleSelectConfig(saved)}
+                      title={active ? '当前使用' : `切换到 ${saved.name}`}
+                    >
+                      <span className="saved-config__name">{saved.name}</span>
+                      <span className="saved-config__model">{saved.model}</span>
+                      {active && <span className="saved-config__badge">✓ 当前</span>}
+                    </button>
+                    <button
+                      type="button"
+                      className="saved-config__del"
+                      onClick={() => handleDeleteConfig(saved.id)}
+                      title="删除"
+                    >×</button>
+                  </div>
+                )
+              })}
             </div>
-            <div className="field">
-              <label className="field__label">API Key</label>
-              <div className="field__row">
-                <input className="input" type={showManualKey ? 'text' : 'password'} placeholder="sk-..."
-                  value={manualKey} onChange={(e) => setManualKey(e.target.value)} />
-                <button type="button" className="btn btn--ghost" style={{ flexShrink: 0 }}
-                  onClick={() => setShowManualKey((v) => !v)}>{showManualKey ? '隐藏' : '显示'}</button>
-              </div>
+          ) : (
+            <div className="field__hint" style={{ marginBottom: 10 }}>
+              还没有保存的配置。在下方添加一个，或从 opencode.json 选择。
             </div>
-            <div className="field">
-              <label className="field__label">模型名称 (Model)</label>
-              <input className="input" placeholder="gpt-4o-mini" value={manualModel}
-                onChange={(e) => setManualModel(e.target.value)} />
+          )}
+
+          {/* Add new config form */}
+          <div className="saved-config-form">
+            <div className="field__hint" style={{ marginBottom: 6 }}>添加新配置：</div>
+            <input className="input" placeholder="名称（如：DeepSeek）" value={newName}
+              onChange={(e) => setNewName(e.target.value)} style={{ marginBottom: 6 }} />
+            <input className="input" placeholder="API 地址 (https://api.openai.com/v1)" value={newUrl}
+              onChange={(e) => setNewUrl(e.target.value)} style={{ marginBottom: 6 }} />
+            <div className="field__row" style={{ marginBottom: 6 }}>
+              <input className="input" type={showNewKey ? 'text' : 'password'} placeholder="API Key (sk-...)"
+                value={newKey} onChange={(e) => setNewKey(e.target.value)} />
+              <button type="button" className="btn btn--ghost" style={{ flexShrink: 0 }}
+                onClick={() => setShowNewKey((v) => !v)}>{showNewKey ? '隐藏' : '显示'}</button>
             </div>
-          </div>
-          <div className="field">
-            <button type="button" className="btn btn--primary" onClick={handleManualSave}
-              disabled={!manualUrl.trim() || !manualModel.trim()}>
-              保存手动配置
+            <input className="input" placeholder="模型名称 (gpt-4o-mini)" value={newModel}
+              onChange={(e) => setNewModel(e.target.value)} style={{ marginBottom: 8 }} />
+            <button type="button" className="btn btn--primary" onClick={handleAddConfig}
+              disabled={!newUrl.trim() || !newModel.trim()}>
+              + 保存并使用
             </button>
-            {manualHint && (
-              <div className={`field__hint ${manualHint.startsWith('✓') ? 'field__hint--success' : 'field__hint--error'}`} style={{ marginTop: 6 }}>
-                {manualHint}
+            {configHint && (
+              <div className={`field__hint ${configHint.startsWith('✓') ? 'field__hint--success' : 'field__hint--error'}`} style={{ marginTop: 6 }}>
+                {configHint}
               </div>
             )}
           </div>

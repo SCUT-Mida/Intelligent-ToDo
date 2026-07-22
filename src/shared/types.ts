@@ -86,6 +86,17 @@ export interface AppConfig {
   model: string
 }
 
+/** A saved AI config profile. Users can store multiple and switch between them. */
+export interface SavedAiConfig {
+  /** Auto-generated unique id. */
+  id: string
+  /** User-facing name like 'DeepSeek' or 'GLM-4'. */
+  name: string
+  apiUrl: string
+  apiKey: string
+  model: string
+}
+
 /** Full persisted app data */
 export interface AppData {
   tasks: Task[]
@@ -98,6 +109,8 @@ export interface AppData {
   holidayOverrides?: Record<number, YearHolidayData>
   /** Company rule: treat the last Saturday of each month as a workday. Default true. */
   companyLastSaturday?: boolean
+  /** Saved AI config profiles — users can store multiple and switch between them. */
+  savedAiConfigs?: SavedAiConfig[]
 }
 
 /** A single AI-recommended priority item pointing to an existing task. */
