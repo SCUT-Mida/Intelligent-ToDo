@@ -35,6 +35,13 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null)
   const [selectHint, setSelectHint] = useState<string | null>(null)
 
+  // Manual config fields (fallback when opencode.json isn't available)
+  const [manualUrl, setManualUrl] = useState(config.apiUrl)
+  const [manualKey, setManualKey] = useState(config.apiKey)
+  const [manualModel, setManualModel] = useState(config.model)
+  const [showManualKey, setShowManualKey] = useState(false)
+  const [manualHint, setManualHint] = useState<string | null>(null)
+
   const [appStatus, setAppStatus] = useState<{ version: string; isPackaged: boolean } | null>(null)
   const [updateState, setUpdateState] = useState<UpdateState>({ stage: 'idle' })
 
@@ -110,6 +117,11 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
       apiKey: provider.apiKey,
       model: modelEntry.modelId
     })
+    // Sync manual fields too so they stay consistent
+    setManualUrl(provider.baseURL)
+    setManualKey(provider.apiKey)
+    setManualModel(modelEntry.modelId)
+
     setSelectHint(`✓ 已切换到 ${provider.displayName} / ${modelEntry.displayName ?? modelEntry.modelId}`)
     window.setTimeout(() => setSelectHint(null), 3000)
   }, [isCurrentModel, onSave])
@@ -144,8 +156,21 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
     }
   }
 
-  const handleOpenLogFile = async (): Promise<void> => {
-    setOpenLogState({ stage: 'opening' })
+  const handleManualSave = useCallback((): void => {
+    const url = manualUrl.trim()
+    const key = manualKey.trim()
+    const model = manualModel.trim()
+    if (!url || !model) {
+      setManualHint('⚠️ API 地址和模型名称不能为空')
+      window.setTimeout(() => setManualHint(null), 4000)
+      return
+    }
+    onSave({ apiUrl: url, apiKey: key, model })
+    setManualHint('✓ 手动配置已保存')
+    window.setTimeout(() => setManualHint(null), 3000)
+  }, [manualUrl, manualKey, manualModel, onSave])
+
+  const handleOpenLogFile = async (): Promise<void> => {    setOpenLogState({ stage: 'opening' })
     try {
       const result = await window.api.openLogFile()
       if (result.ok) {
@@ -275,6 +300,47 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
               {selectHint}
             </div>
           )}
+        </div>
+
+        {/* Manual config fallback */}
+        <div className="settings-divider" />
+        <div className="field">
+          <label className="field__label">或者手动配置</label>
+          <div className="field__hint" style={{ marginBottom: 10 }}>
+            如果没有使用 opencode.json，可在此手动填写 API 信息。
+          </div>
+          <div className="manual-config-grid">
+            <div className="field">
+              <label className="field__label">API 地址 (Base URL)</label>
+              <input className="input" placeholder="https://api.openai.com/v1" value={manualUrl}
+                onChange={(e) => setManualUrl(e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="field__label">API Key</label>
+              <div className="field__row">
+                <input className="input" type={showManualKey ? 'text' : 'password'} placeholder="sk-..."
+                  value={manualKey} onChange={(e) => setManualKey(e.target.value)} />
+                <button type="button" className="btn btn--ghost" style={{ flexShrink: 0 }}
+                  onClick={() => setShowManualKey((v) => !v)}>{showManualKey ? '隐藏' : '显示'}</button>
+              </div>
+            </div>
+            <div className="field">
+              <label className="field__label">模型名称 (Model)</label>
+              <input className="input" placeholder="gpt-4o-mini" value={manualModel}
+                onChange={(e) => setManualModel(e.target.value)} />
+            </div>
+          </div>
+          <div className="field">
+            <button type="button" className="btn btn--primary" onClick={handleManualSave}
+              disabled={!manualUrl.trim() || !manualModel.trim()}>
+              保存手动配置
+            </button>
+            {manualHint && (
+              <div className={`field__hint ${manualHint.startsWith('✓') ? 'field__hint--success' : 'field__hint--error'}`} style={{ marginTop: 6 }}>
+                {manualHint}
+              </div>
+            )}
+          </div>
         </div>
       </Section>
 
