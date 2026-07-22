@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, rmSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
@@ -29,10 +29,12 @@ if (!gotTheLock) {
 }
 
 app.on('second-instance', () => {
-  // User launched us again — focus the existing window instead of starting.
+  // User launched us again — show the existing window (it may be hidden
+  // in the system tray from a previous close-to-tray action).
   const wins = BrowserWindow.getAllWindows()
   if (wins.length > 0) {
     if (wins[0].isMinimized()) wins[0].restore()
+    if (!wins[0].isVisible()) wins[0].show()
     wins[0].focus()
   }
 })
@@ -47,6 +49,13 @@ try {
 }
 
 const DATA_FILE = join(app.getPath('userData'), 'todo-data.json')
+
+// ── Tray / close-to-tray support ───────────────────────────────────────────
+// When the user clicks the window's X button, hide to tray instead of quitting.
+// Actual quit is via the tray context menu → "退出应用".
+let tray: Tray | null = null
+let isQuitting = false
+let hasShownTrayBalloon = false
 
 // ── Proxy-aware HTTP via Electron's net module ──────────────────────────────
 // The netFetch function is now in ./netFetch.ts, imported above.
@@ -525,6 +534,26 @@ function createWindow(): BrowserWindow {
     mainWindow.show()
   })
 
+  // Intercept the close button (X) to hide-to-tray instead of quitting.
+  // Actual quit is only via the tray context menu ("退出应用") or
+  // auto-updater's quitAndInstall.
+  mainWindow.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault()
+      mainWindow.hide()
+      // First-time balloon so the user knows the app didn't just vanish.
+      if (tray && !hasShownTrayBalloon) {
+        tray.displayBalloon({
+          title: '本地AI工具集',
+          content: '应用已最小化到系统托盘，继续在后台运行。右键托盘图标可选择「退出应用」。'
+        })
+        hasShownTrayBalloon = true
+      }
+      logger.info('app', 'window hidden to tray (close intercepted)')
+    }
+    // If isQuitting is true, let the close proceed normally.
+  })
+
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
@@ -537,6 +566,61 @@ function createWindow(): BrowserWindow {
   }
 
   return mainWindow
+}
+
+/**
+ * Create the system tray icon with context menu.
+ * - Left-click: show/focus the main window.
+ * - Right-click: context menu with "显示主窗口" and "退出应用".
+ * The tray persists for the app's lifetime; it's destroyed when the app quits.
+ */
+function createTray(mainWindow: BrowserWindow): void {
+  // Resolve tray icon: prefer build/icon.png (master 256x256, auto-resized
+  // by Electron to 16x16 for the Windows system tray).
+  const iconPath = join(app.getAppPath(), 'build', 'icon.png')
+  let icon: Electron.NativeImage
+  if (existsSync(iconPath)) {
+    icon = nativeImage.createFromPath(iconPath)
+    // Resize to 16x16 for crisp tray display on Windows
+    icon = icon.resize({ width: 16, height: 16 })
+  } else {
+    icon = nativeImage.createEmpty()
+  }
+
+  tray = new Tray(icon)
+  tray.setToolTip('本地AI工具集')
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: '显示主窗口',
+      click: (): void => {
+        if (!mainWindow.isVisible()) mainWindow.show()
+        mainWindow.focus()
+      }
+    },
+    { type: 'separator' },
+    {
+      label: '退出应用',
+      click: (): void => {
+        isQuitting = true
+        app.quit()
+      }
+    }
+  ])
+  tray.setContextMenu(contextMenu)
+
+  // Left-click on tray icon toggles window visibility
+  tray.on('click', () => {
+    if (mainWindow.isVisible() && mainWindow.isFocused()) {
+      // Window is visible and focused — hide it (like a toggle)
+      mainWindow.hide()
+    } else {
+      if (!mainWindow.isVisible()) mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+
+  logger.info('app', 'system tray created')
 }
 
 app.whenReady().then(() => {
@@ -652,6 +736,12 @@ app.whenReady().then(() => {
 
   createWindow()
 
+  // Create the system tray (must be after the window is created).
+  const mainWindow = BrowserWindow.getAllWindows()[0]
+  if (mainWindow) {
+    createTray(mainWindow)
+  }
+
   // ---- auto-update (electron-updater) ----
   // Don't auto-download; let the user confirm in Settings. Update events are
   // forwarded to the renderer so the Settings panel can show live status.
@@ -707,8 +797,13 @@ app.whenReady().then(() => {
     return true
   })
   ipcMain.handle('update:install', () => {
-    // quitAndInstall closes the app and runs the downloaded NSIS installer,
-    // which silently replaces the installed version, then relaunches.
+    // Set isQuitting so the window's close interceptor lets the close
+    // proceed (quitAndInstall closes all windows first).
+    isQuitting = true
+    if (tray) {
+      tray.destroy()
+      tray = null
+    }
     autoUpdater.quitAndInstall()
     return true
   })
@@ -719,11 +814,22 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  logger.info('app', 'window-all-closed fired', { platform: process.platform })
-  if (process.platform !== 'darwin') {
-    logger.info('app', 'calling app.quit()')
+  // With the tray system, closing all windows should NOT quit the app.
+  // The window's close event is intercepted to hide-to-tray, so this
+  // event only fires when isQuitting is true (user explicitly chose to
+  // quit via the tray menu, or the auto-updater is installing).
+  logger.info('app', 'window-all-closed fired', { isQuitting })
+  if (isQuitting) {
+    // Dispose tray before final exit so it doesn't linger.
+    if (tray) {
+      tray.destroy()
+      tray = null
+    }
     app.quit()
   }
+  // If isQuitting is false (shouldn't normally happen with our close
+  // interception, but just in case), do nothing — the app stays alive
+  // in the tray.
 })
 
 process.on('exit', (code) => {
