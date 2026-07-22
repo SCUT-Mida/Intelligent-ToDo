@@ -171,7 +171,10 @@ export default function RepoNavView({
     if (!config) return
     const templates = config.commandTemplates ?? []
     const selected = templates.find((t) => t.id === selectedTemplate) ?? templates[0]
-    const command = selected?.command ?? 'git pull; opencode'
+    // Join steps into a single shell command: ['git pull', 'opencode'] → 'git pull; opencode'
+    const command = selected?.steps?.length
+      ? selected.steps.join('; ')
+      : 'git pull; opencode'
     const mode = config.openIn
 
     try {

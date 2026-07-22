@@ -72,8 +72,8 @@ export interface CommandTemplate {
   label: string
   /** Chinese description like '拉取最新代码并启动 opencode 编辑器'. */
   description: string
-  /** Shell command like 'git pull; opencode'. */
-  command: string
+  /** Ordered list of shell commands executed sequentially (joined by '; '). */
+  steps: string[]
 }
 
 // ── AI Memory types ─────────────────────────────────────────────────────────
@@ -115,10 +115,31 @@ export const IPC_V2 = {
 // ── Default command templates (Chinese labels) ─────────────────────────────
 
 export const DEFAULT_TEMPLATES: CommandTemplate[] = [
-  { id: 'default', label: '默认', description: '拉取最新代码并启动 opencode 编辑器', command: 'git pull; opencode' },
-  { id: 'update', label: '仅更新', description: '只拉取最新代码，不开编辑器', command: 'git pull --prune' },
-  { id: 'code', label: 'VSCode', description: '拉取最新代码并用 VSCode 打开', command: 'git pull; code .' },
-  { id: 'build', label: '构建', description: '拉取最新代码并执行 npm 构建', command: 'git pull; npm run build' },
+  { id: 'default', label: '默认', description: '拉取最新代码并启动 opencode 编辑器', steps: ['git pull', 'opencode'] },
+  { id: 'update', label: '仅更新', description: '只拉取最新代码，不开编辑器', steps: ['git pull'] },
+  { id: 'code', label: 'VSCode', description: '拉取最新代码并用 VSCode 打开', steps: ['git pull', 'code .'] },
+  { id: 'build', label: '构建', description: '拉取最新代码并执行 npm 构建', steps: ['git pull', 'npm run build'] },
+]
+
+/**
+ * Common commands users can pick from when building templates.
+ * Shown in the UI as a "quick add" dropdown for convenience.
+ */
+export const COMMON_COMMANDS: Array<{ command: string; label: string }> = [
+  { command: 'git pull', label: 'Git 拉取' },
+  { command: 'git pull --prune', label: 'Git 拉取+清理' },
+  { command: 'git status', label: 'Git 状态' },
+  { command: 'opencode', label: 'OpenCode' },
+  { command: 'code .', label: 'VSCode' },
+  { command: 'npm install', label: 'NPM 安装依赖' },
+  { command: 'npm run build', label: 'NPM 构建' },
+  { command: 'npm run dev', label: 'NPM 开发' },
+  { command: 'npm test', label: 'NPM 测试' },
+  { command: 'pnpm install', label: 'PNPM 安装' },
+  { command: 'cargo build', label: 'Cargo 构建' },
+  { command: 'go build ./...', label: 'Go 构建' },
+  { command: 'python -m venv .venv', label: 'Python 虚拟环境' },
+  { command: 'docker compose up -d', label: 'Docker 启动' },
 ]
 
 // ── Repo Navigator config (matches config.json / config.example.json) ────────
@@ -326,39 +347,81 @@ export const DEFAULT_TOOL_BINARIES: Record<ToolKind, string> = {
 // ── Legacy config migration ─────────────────────────────────────────────────
 
 /**
- * Convert an old-format config whose `commandTemplates` is a `Record<string, string>`
- * to the new `CommandTemplate[]` format. Idempotent — safe to call on already-migrated
- * configs (they pass through unchanged).
+ * Normalize a single command template from any known legacy format to the
+ * current `{ id, label, description, steps }` shape. Handles:
+ *   - Record<string,string> entries (oldest format, from v1.9 era)
+ *   - `{ command: string }` entries (pre-v1.12 single-string format)
+ *   - `{ steps: string[] }` entries (current format, passthrough)
+ */
+function normalizeTemplate(raw: Record<string, unknown>): CommandTemplate {
+  const id = typeof raw['id'] === 'string' ? raw['id'] : 'cmd'
+  const label = typeof raw['label'] === 'string' ? raw['label'] : id
+  const description = typeof raw['description'] === 'string' ? raw['description'] : ''
+
+  // Current format: steps is already an array
+  if (Array.isArray(raw['steps'])) {
+    return {
+      id, label, description,
+      steps: (raw['steps'] as unknown[]).filter((s): s is string => typeof s === 'string')
+    }
+  }
+
+  // Legacy: command is a single string → split by semicolon into steps
+  if (typeof raw['command'] === 'string') {
+    return {
+      id, label, description,
+      steps: raw['command']
+        .split(';')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    }
+  }
+
+  // Unknown shape — return empty steps
+  return { id, label, description, steps: [] }
+}
+
+/**
+ * Convert an old-format config to the current format. Idempotent — safe to
+ * call on already-migrated configs.
  *
- * Accepts raw parsed JSON (unknown) to handle runtime format detection without
- * compile-time conflicts.
+ * Handles two legacy shapes:
+ *   1. commandTemplates as Record<string, string> (v1.9 era)
+ *   2. commandTemplates as array of { command: string } (pre-v1.12)
  */
 export function migrateLegacyConfig(raw: unknown): RepoNavConfig {
   if (typeof raw !== 'object' || raw === null) {
     return {} as RepoNavConfig
   }
 
-  // Access commandTemplates dynamically to handle dual format
   const rawObj = raw as Record<string, unknown>
   const templates = rawObj['commandTemplates']
 
-  // Detect legacy format: is a non-null, non-array object (Record<string, string>)
+  // Shape 1: legacy Record<string, string>
   if (typeof templates === 'object' && templates !== null && !Array.isArray(templates)) {
     const legacyEntries = Object.entries(templates as Record<string, unknown>)
-    const migrated: CommandTemplate[] = legacyEntries.map(([id, command]) => ({
-      id,
-      label: id,
-      description: '',
-      command: typeof command === 'string' ? command : String(command)
-    }))
-
-    // Return merged with other fields preserved
-    return {
-      ...(raw as RepoNavConfig),
-      commandTemplates: migrated
-    }
+    const migrated: CommandTemplate[] = legacyEntries.map(([id, command]) =>
+      normalizeTemplate({
+        id,
+        label: id,
+        description: '',
+        command: typeof command === 'string' ? command : String(command)
+      })
+    )
+    return { ...(raw as RepoNavConfig), commandTemplates: migrated }
   }
 
-  // Already migrated or no templates field — return as-is
+  // Shape 2: array that may contain { command: string } entries
+  if (Array.isArray(templates)) {
+    const migrated = templates.map((t) => {
+      if (t && typeof t === 'object') {
+        return normalizeTemplate(t as Record<string, unknown>)
+      }
+      return { id: 'unknown', label: 'unknown', description: '', steps: [] }
+    })
+    return { ...(raw as RepoNavConfig), commandTemplates: migrated }
+  }
+
+  // No commandTemplates or already in current format — return as-is
   return raw as RepoNavConfig
 }
