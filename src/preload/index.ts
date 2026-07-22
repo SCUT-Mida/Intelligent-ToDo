@@ -31,6 +31,7 @@ const api = {
     opts?: { companyLastSaturday?: boolean }
   ): Promise<AiPriorityResult> =>
     ipcRenderer.invoke('ai:recommend', tasks, config, holidayOverrides, opts),
+  cancelAiRecommend: (): Promise<boolean> => ipcRenderer.invoke('ai:cancel'),
   fetchHolidays: (year: number): Promise<YearHolidayData> =>
     ipcRenderer.invoke('holidays:fetch', year),
   exportMarkdown: (content: string, defaultName: string): Promise<boolean> =>

@@ -199,10 +199,20 @@ export default function TodoApp(): JSX.Element {
       dispatch({ type: 'SET_DATA', payload: { ...prev, priorities: [...filtered, newPriority] } })
       setAiState({ kind: 'idle' })
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      setAiState({ kind: 'error', message })
+      // Check if this was a user-initiated cancel
+      const msg = e instanceof Error ? e.message : String(e)
+      if (msg.includes('超时') || msg.includes('timeout') || msg.includes('abort') || msg.includes('Abort')) {
+        setAiState({ kind: 'idle' })  // silent return to idle on cancel
+      } else {
+        setAiState({ kind: 'error', message: msg })
+      }
     }
   }, [state.data, dispatch])
+
+  const handleAiCancel = useCallback(async (): Promise<void> => {
+    await window.api.cancelAiRecommend()
+    setAiState({ kind: 'idle' })
+  }, [])
 
   const handleTogglePriorityItem = useCallback((taskId: string): void => {
     const todayLocal = todayStr()
@@ -385,6 +395,7 @@ export default function TodoApp(): JSX.Element {
             aiState={aiState}
             incompleteCount={incompleteCount}
             onRegenerate={handleAiRegenerate}
+            onCancel={handleAiCancel}
             onTogglePriorityItem={handleTogglePriorityItem}
             onUpdateProgress={handleUpdateProgress}
             onEditTask={(t) => setTaskModal({ task: t, quadrant: t.quadrant })}

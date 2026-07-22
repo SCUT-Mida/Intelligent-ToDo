@@ -9,23 +9,16 @@ type AiState =
   | { kind: 'error'; message: string }
 
 interface TodayPriorityViewProps {
-  /** All tasks (used to resolve priority items -> task content/quadrant) */
   tasks: Task[]
-  /** Today's priority snapshot, or null if not yet generated */
   todayPriority: DailyPriority | null
-  /** Past daily priorities (excluding today), should be sorted newest-first by caller */
   history: DailyPriority[]
-  /** Current AI call state */
   aiState: AiState
-  /** Number of incomplete tasks (for the "start analysis" gate) */
   incompleteCount: number
-  /** Trigger AI re-analysis */
   onRegenerate: () => void
-  /** Toggle a priority item's completion (also toggles linked task) */
+  /** Cancel an in-flight AI analysis */
+  onCancel: () => void
   onTogglePriorityItem: (taskId: string) => void
-  /** Update a priority item's progress (0-100) */
   onUpdateProgress: (taskId: string, progress: number) => void
-  /** Open the task editor for a priority item */
   onEditTask: (task: Task) => void
 }
 
@@ -60,6 +53,7 @@ export default function TodayPriorityView({
   aiState,
   incompleteCount,
   onRegenerate,
+  onCancel,
   onTogglePriorityItem,
   onUpdateProgress,
   onEditTask
@@ -107,6 +101,7 @@ export default function TodayPriorityView({
                 taskMap={taskMap}
                 todayHasItems={todayHasItems}
                 onRegenerate={onRegenerate}
+                onCancel={onCancel}
                 onTogglePriorityItem={onTogglePriorityItem}
                 onUpdateProgress={onUpdateProgress}
                 onEditTask={onEditTask}
@@ -138,6 +133,15 @@ export default function TodayPriorityView({
                     ? '重新分析'
                     : '开始智能分析'}
               </button>
+              {aiState.kind === 'loading' && (
+                <button
+                  className="btn btn--ghost"
+                  onClick={onCancel}
+                  title="中断当前分析"
+                >
+                  取消
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -156,9 +160,9 @@ interface TodayTabProps {
   taskMap: Map<string, Task>
   todayHasItems: boolean
   onRegenerate: () => void
+  onCancel: () => void
   onTogglePriorityItem: (taskId: string) => void
   onUpdateProgress: (taskId: string, progress: number) => void
-  /** Open the full task editor (content + quadrant + due date) for a priority item */
   onEditTask: (task: Task) => void
 }
 
@@ -170,6 +174,7 @@ function TodayTab({
   taskMap,
   todayHasItems,
   onRegenerate,
+  onCancel,
   onTogglePriorityItem,
   onUpdateProgress,
   onEditTask

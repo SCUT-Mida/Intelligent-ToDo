@@ -57,6 +57,11 @@ let tray: Tray | null = null
 let isQuitting = false
 let hasShownTrayBalloon = false
 
+// AbortController for the currently-running AI analysis. Set by the
+// ai:recommend IPC handler, cleared on completion/error, and abortable
+// via the ai:cancel IPC handler (triggered by the renderer's "取消" button).
+let aiAbortController: AbortController | null = null
+
 // ── Proxy-aware HTTP via Electron's net module ──────────────────────────────
 // The netFetch function is now in ./netFetch.ts, imported above.
 // The encryptApiKey/decryptApiKey functions are now in ./crypto.ts, imported above.
@@ -176,7 +181,8 @@ async function aiRecommend(
   tasks: Task[],
   config: AppConfig,
   holidayOverrides?: Record<number, YearHolidayData>,
-  opts?: { companyLastSaturday?: boolean }
+  opts?: { companyLastSaturday?: boolean },
+  externalSignal?: AbortSignal
 ): Promise<AiPriorityResult> {
   if (!config.apiUrl || !config.apiKey || !config.model) {
     throw new Error('请先在配置页面填写完整的 AI 配置（URL、Key、Model）')
@@ -269,9 +275,15 @@ async function aiRecommend(
     '}\n\n' +
     '注意：taskId 字段必须精确匹配上方任务列表中 [ID: xxx] 的值，不要编造 ID。'
 
-  // Timeout the request so a hung API endpoint can't freeze the UI forever.
+  // Timeout + external cancel support. The controller is ours; if either the
+  // timeout fires OR the external signal (from renderer's "取消" button)
+  // aborts, the fetch throws AbortError.
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 60000)
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort()
+    else externalSignal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
   let resp: NetResponse
   try {
     resp = await netFetch(url, {
@@ -702,8 +714,6 @@ app.whenReady().then(() => {
     saveData(data)
     return true
   })
-  // Run the AI analysis and return the structured result. Errors are thrown
-  // to the renderer which shows them in the UI. We also log the outcome.
   ipcMain.handle(
     'ai:recommend',
     async (
@@ -713,8 +723,10 @@ app.whenReady().then(() => {
       holidayOverrides?: Record<number, YearHolidayData>,
       opts?: { companyLastSaturday?: boolean }
     ) => {
+      // Create a fresh AbortController so the renderer can cancel via ai:cancel.
+      aiAbortController = new AbortController()
       try {
-        const result = await aiRecommend(tasks, config, holidayOverrides, opts)
+        const result = await aiRecommend(tasks, config, holidayOverrides, opts, aiAbortController.signal)
         logger.info('aiRecommend', 'completed successfully', {
           itemsReturned: result.items.length
         })
@@ -724,9 +736,22 @@ app.whenReady().then(() => {
           error: err instanceof Error ? err.message : String(err)
         })
         throw err
+      } finally {
+        aiAbortController = null
       }
     }
   )
+
+  // Cancel an in-flight AI analysis. Returns true if a request was aborted.
+  ipcMain.handle('ai:cancel', (): boolean => {
+    if (aiAbortController) {
+      aiAbortController.abort()
+      logger.info('aiRecommend', 'user-requested cancel')
+      aiAbortController = null
+      return true
+    }
+    return false
+  })
   ipcMain.handle('holidays:fetch', (_e, year: number) => fetchHolidays(year))
   ipcMain.handle(
     'md:export',
