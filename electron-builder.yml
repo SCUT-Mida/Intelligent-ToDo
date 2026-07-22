@@ -21,6 +21,8 @@ directories:
 files:
   - out/**/*
   - package.json
+  - build/icon.png
+  - build/icon.ico
   - "!**/*.{ts,tsx,md,map}"
   - "!**/.eslintrc*"
   - "!**/tsconfig*.json"

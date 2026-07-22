@@ -575,15 +575,25 @@ function createWindow(): BrowserWindow {
  * The tray persists for the app's lifetime; it's destroyed when the app quits.
  */
 function createTray(mainWindow: BrowserWindow): void {
-  // Resolve tray icon: prefer build/icon.png (master 256x256, auto-resized
-  // by Electron to 16x16 for the Windows system tray).
-  const iconPath = join(app.getAppPath(), 'build', 'icon.png')
+  // Resolve tray icon. Prefer .ico on Windows (supports multiple sizes
+  // natively — the OS picks 16x16 for the tray automatically, sharper than
+  // resizing a PNG). Fall back to .png (resize to 16x16), then empty.
+  //
+  // IMPORTANT: build/icon.* must be in electron-builder.yml's `files` list,
+  // otherwise the file won't be inside the asar at runtime and the tray
+  // will show a blank/white icon.
+  const icoPath = join(app.getAppPath(), 'build', 'icon.ico')
+  const pngPath = join(app.getAppPath(), 'build', 'icon.png')
   let icon: Electron.NativeImage
-  if (existsSync(iconPath)) {
-    icon = nativeImage.createFromPath(iconPath)
-    // Resize to 16x16 for crisp tray display on Windows
+
+  if (existsSync(icoPath)) {
+    icon = nativeImage.createFromPath(icoPath)
+    // .ico already has multiple sizes — no resize needed
+  } else if (existsSync(pngPath)) {
+    icon = nativeImage.createFromPath(pngPath)
     icon = icon.resize({ width: 16, height: 16 })
   } else {
+    logger.warn('app', 'tray icon not found, using empty icon', { icoPath, pngPath })
     icon = nativeImage.createEmpty()
   }
 
