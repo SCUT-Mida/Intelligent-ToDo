@@ -63,17 +63,29 @@ export interface RepoIndex {
   repos: RepoEntry[]
 }
 
-// ── Command Template ────────────────────────────────────────────────────────
+// ── Command (reusable individual command) ──────────────────────────────────
+
+/** A standalone, reusable shell command that can be referenced by templates. */
+export interface RepoCommand {
+  /** Auto-generated unique id (hidden from user). */
+  id: string
+  /** User-facing name, e.g. "Git 拉取". */
+  name: string
+  /** Shell command string, e.g. "git pull". */
+  command: string
+}
+
+// ── Command Template (ordered combination of commands) ─────────────────────
 
 export interface CommandTemplate {
-  /** Stable key like 'default', 'update'. */
+  /** Auto-generated unique id (hidden from user; used internally for defaultTemplate ref). */
   id: string
-  /** Chinese label like '默认'. */
-  label: string
+  /** User-facing name like '默认'. */
+  name: string
   /** Chinese description like '拉取最新代码并启动 opencode 编辑器'. */
   description: string
-  /** Ordered list of shell commands executed sequentially (joined by '; '). */
-  steps: string[]
+  /** Ordered list of RepoCommand IDs executed sequentially. */
+  commandIds: string[]
 }
 
 // ── AI Memory types ─────────────────────────────────────────────────────────
@@ -114,31 +126,37 @@ export const IPC_V2 = {
 
 // ── Default command templates (Chinese labels) ─────────────────────────────
 
+export const DEFAULT_COMMANDS: RepoCommand[] = [
+  { id: 'cmd-git-pull', name: 'Git 拉取', command: 'git pull' },
+  { id: 'cmd-git-prune', name: 'Git 拉取+清理', command: 'git pull --prune' },
+  { id: 'cmd-opencode', name: 'OpenCode', command: 'opencode' },
+  { id: 'cmd-vscode', name: 'VSCode', command: 'code .' },
+  { id: 'cmd-npm-install', name: 'NPM 安装', command: 'npm install' },
+  { id: 'cmd-npm-build', name: 'NPM 构建', command: 'npm run build' },
+  { id: 'cmd-npm-dev', name: 'NPM 开发', command: 'npm run dev' },
+  { id: 'cmd-npm-test', name: 'NPM 测试', command: 'npm test' },
+  { id: 'cmd-docker-up', name: 'Docker 启动', command: 'docker compose up -d' },
+]
+
 export const DEFAULT_TEMPLATES: CommandTemplate[] = [
-  { id: 'default', label: '默认', description: '拉取最新代码并启动 opencode 编辑器', steps: ['git pull', 'opencode'] },
-  { id: 'update', label: '仅更新', description: '只拉取最新代码，不开编辑器', steps: ['git pull'] },
-  { id: 'code', label: 'VSCode', description: '拉取最新代码并用 VSCode 打开', steps: ['git pull', 'code .'] },
-  { id: 'build', label: '构建', description: '拉取最新代码并执行 npm 构建', steps: ['git pull', 'npm run build'] },
+  { id: 'tpl-default', name: '默认', description: '拉取最新代码并启动 opencode', commandIds: ['cmd-git-pull', 'cmd-opencode'] },
+  { id: 'tpl-update', name: '仅更新', description: '只拉取最新代码', commandIds: ['cmd-git-pull'] },
+  { id: 'tpl-vscode', name: 'VSCode', description: '拉取并用 VSCode 打开', commandIds: ['cmd-git-pull', 'cmd-vscode'] },
+  { id: 'tpl-build', name: '构建', description: '拉取并构建', commandIds: ['cmd-git-pull', 'cmd-npm-build'] },
 ]
 
 /**
- * Common commands users can pick from when building templates.
- * Shown in the UI as a "quick add" dropdown for convenience.
+ * Common commands used for migration name suggestions (mapping raw command
+ * strings to friendly Chinese labels when auto-creating RepoCommand entries).
  */
 export const COMMON_COMMANDS: Array<{ command: string; label: string }> = [
   { command: 'git pull', label: 'Git 拉取' },
   { command: 'git pull --prune', label: 'Git 拉取+清理' },
-  { command: 'git status', label: 'Git 状态' },
   { command: 'opencode', label: 'OpenCode' },
   { command: 'code .', label: 'VSCode' },
-  { command: 'npm install', label: 'NPM 安装依赖' },
+  { command: 'npm install', label: 'NPM 安装' },
   { command: 'npm run build', label: 'NPM 构建' },
   { command: 'npm run dev', label: 'NPM 开发' },
-  { command: 'npm test', label: 'NPM 测试' },
-  { command: 'pnpm install', label: 'PNPM 安装' },
-  { command: 'cargo build', label: 'Cargo 构建' },
-  { command: 'go build ./...', label: 'Go 构建' },
-  { command: 'python -m venv .venv', label: 'Python 虚拟环境' },
   { command: 'docker compose up -d', label: 'Docker 启动' },
 ]
 
@@ -155,6 +173,8 @@ export interface RepoNavConfig {
   excludePatterns: string[]
   /** Named command templates. */
   commandTemplates: CommandTemplate[]
+  /** Individual reusable commands referenced by templates. */
+  commands: RepoCommand[]
   /** Which template is selected by default. */
   defaultTemplate: string
   /** Open mode: "new-tab" or "new-window". */
@@ -347,47 +367,19 @@ export const DEFAULT_TOOL_BINARIES: Record<ToolKind, string> = {
 // ── Legacy config migration ─────────────────────────────────────────────────
 
 /**
- * Normalize a single command template from any known legacy format to the
- * current `{ id, label, description, steps }` shape. Handles:
- *   - Record<string,string> entries (oldest format, from v1.9 era)
- *   - `{ command: string }` entries (pre-v1.12 single-string format)
- *   - `{ steps: string[] }` entries (current format, passthrough)
- */
-function normalizeTemplate(raw: Record<string, unknown>): CommandTemplate {
-  const id = typeof raw['id'] === 'string' ? raw['id'] : 'cmd'
-  const label = typeof raw['label'] === 'string' ? raw['label'] : id
-  const description = typeof raw['description'] === 'string' ? raw['description'] : ''
-
-  // Current format: steps is already an array
-  if (Array.isArray(raw['steps'])) {
-    return {
-      id, label, description,
-      steps: (raw['steps'] as unknown[]).filter((s): s is string => typeof s === 'string')
-    }
-  }
-
-  // Legacy: command is a single string → split by semicolon into steps
-  if (typeof raw['command'] === 'string') {
-    return {
-      id, label, description,
-      steps: raw['command']
-        .split(';')
-        .map((s) => s.trim())
-        .filter(Boolean)
-    }
-  }
-
-  // Unknown shape — return empty steps
-  return { id, label, description, steps: [] }
-}
-
-/**
- * Convert an old-format config to the current format. Idempotent — safe to
- * call on already-migrated configs.
+ * Convert any known legacy config format to the current shape:
+ *   commands: RepoCommand[]
+ *   commandTemplates: CommandTemplate[] with commandIds referencing commands
  *
- * Handles two legacy shapes:
- *   1. commandTemplates as Record<string, string> (v1.9 era)
- *   2. commandTemplates as array of { command: string } (pre-v1.12)
+ * Handles ALL previous formats:
+ *   0. Record<string,string> commandTemplates (v1.9 era)
+ *   1. { id, label, description, command: string } (pre-v1.11.10)
+ *   2. { id, label, description, steps: string[] } (v1.11.10)
+ *   3. Current: { id, name, description, commandIds: string[] } (passthrough)
+ *
+ * For formats 0-2, extracts unique command strings across all templates,
+ * auto-creates RepoCommand entries (with friendly names from COMMON_COMMANDS),
+ * then maps templates to reference those commands via commandIds.
  */
 export function migrateLegacyConfig(raw: unknown): RepoNavConfig {
   if (typeof raw !== 'object' || raw === null) {
@@ -395,33 +387,91 @@ export function migrateLegacyConfig(raw: unknown): RepoNavConfig {
   }
 
   const rawObj = raw as Record<string, unknown>
-  const templates = rawObj['commandTemplates']
+  const templatesRaw = rawObj['commandTemplates']
 
-  // Shape 1: legacy Record<string, string>
-  if (typeof templates === 'object' && templates !== null && !Array.isArray(templates)) {
-    const legacyEntries = Object.entries(templates as Record<string, unknown>)
-    const migrated: CommandTemplate[] = legacyEntries.map(([id, command]) =>
-      normalizeTemplate({
+  // If templates are already in the new format (commandIds exists), check
+  // if commands array also exists — if so, passthrough.
+  const hasNewFormat = Array.isArray(templatesRaw) &&
+    templatesRaw.length > 0 &&
+    typeof (templatesRaw[0] as Record<string, unknown>)?.['commandIds'] !== 'undefined'
+
+  if (hasNewFormat) {
+    return raw as RepoNavConfig
+  }
+
+  // Collect raw template entries from any legacy format
+  let legacyEntries: Array<{ id: string; label: string; description: string; steps: string[] }> = []
+
+  // Shape 0: Record<string, string>
+  if (typeof templatesRaw === 'object' && templatesRaw !== null && !Array.isArray(templatesRaw)) {
+    for (const [id, cmd] of Object.entries(templatesRaw as Record<string, unknown>)) {
+      const cmdStr = typeof cmd === 'string' ? cmd : String(cmd)
+      legacyEntries.push({
         id,
         label: id,
         description: '',
-        command: typeof command === 'string' ? command : String(command)
+        steps: cmdStr.split(';').map((s) => s.trim()).filter(Boolean)
       })
-    )
-    return { ...(raw as RepoNavConfig), commandTemplates: migrated }
-  }
-
-  // Shape 2: array that may contain { command: string } entries
-  if (Array.isArray(templates)) {
-    const migrated = templates.map((t) => {
-      if (t && typeof t === 'object') {
-        return normalizeTemplate(t as Record<string, unknown>)
+    }
+  } else if (Array.isArray(templatesRaw)) {
+    // Shape 1 & 2: array of template objects
+    legacyEntries = templatesRaw.map((t, i) => {
+      if (!t || typeof t !== 'object') {
+        return { id: `tpl-${i}`, label: '未命名', description: '', steps: [] }
       }
-      return { id: 'unknown', label: 'unknown', description: '', steps: [] }
+      const obj = t as Record<string, unknown>
+      const id = typeof obj['id'] === 'string' ? obj['id'] : `tpl-${i}`
+      const label = typeof obj['label'] === 'string' ? obj['label']
+        : typeof obj['name'] === 'string' ? obj['name'] : id
+      const description = typeof obj['description'] === 'string' ? obj['description'] : ''
+
+      let steps: string[] = []
+      if (Array.isArray(obj['steps'])) {
+        steps = (obj['steps'] as unknown[]).filter((s): s is string => typeof s === 'string')
+      } else if (typeof obj['command'] === 'string') {
+        steps = obj['command'].split(';').map((s: string) => s.trim()).filter(Boolean)
+      }
+      return { id, label, description, steps }
     })
-    return { ...(raw as RepoNavConfig), commandTemplates: migrated }
   }
 
-  // No commandTemplates or already in current format — return as-is
-  return raw as RepoNavConfig
+  if (legacyEntries.length === 0) {
+    // No templates at all — return as-is (defaults will fill in)
+    return raw as RepoNavConfig
+  }
+
+  // Extract unique command strings and create RepoCommand entries
+  const cmdStringToId = new Map<string, string>()
+  const commands: RepoCommand[] = []
+  let cmdCounter = 0
+
+  for (const entry of legacyEntries) {
+    for (const step of entry.steps) {
+      if (cmdStringToId.has(step)) continue
+      const cmdId = `cmd-migrated-${cmdCounter++}`
+      const known = COMMON_COMMANDS.find((c) => c.command === step)
+      commands.push({
+        id: cmdId,
+        name: known?.label ?? step,
+        command: step
+      })
+      cmdStringToId.set(step, cmdId)
+    }
+  }
+
+  // Map templates to commandIds
+  const commandTemplates: CommandTemplate[] = legacyEntries.map((entry) => ({
+    id: entry.id,
+    name: entry.label,
+    description: entry.description,
+    commandIds: entry.steps
+      .map((step) => cmdStringToId.get(step))
+      .filter((id): id is string => typeof id === 'string')
+  }))
+
+  return {
+    ...(raw as RepoNavConfig),
+    commands: commands.length > 0 ? commands : DEFAULT_COMMANDS,
+    commandTemplates
+  }
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { RepoNavConfig, CommandTemplate, ToolKind, ToolProbeResult } from '@shared/repoNav'
-import { DEFAULT_TEMPLATES, COMMON_COMMANDS } from '@shared/repoNav'
+import type { RepoNavConfig, CommandTemplate, RepoCommand, ToolKind, ToolProbeResult } from '@shared/repoNav'
+import { DEFAULT_TEMPLATES, DEFAULT_COMMANDS, COMMON_COMMANDS } from '@shared/repoNav'
 import Section from '../components/Section'
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
@@ -10,6 +10,7 @@ const DEFAULT_CONFIG: RepoNavConfig = {
   scanDepth: 3,
   excludePatterns: ['node_modules', '.git', 'dist', 'out', 'build', '__pycache__', '.venv', 'vendor'],
   commandTemplates: [...DEFAULT_TEMPLATES],
+  commands: [...DEFAULT_COMMANDS],
   defaultTemplate: 'default',
   openIn: 'new-tab',
   fallbackToPowerShellExe: true,
@@ -140,6 +141,7 @@ export default function RepoNavSettings(): JSX.Element {
           scanDepth: loaded.scanDepth ?? 3,
           excludePatterns: loaded.excludePatterns ?? [],
           commandTemplates: loaded.commandTemplates?.length ? loaded.commandTemplates : [...DEFAULT_TEMPLATES],
+          commands: loaded.commands?.length ? loaded.commands : [...DEFAULT_COMMANDS],
           defaultTemplate: loaded.defaultTemplate ?? 'default',
           openIn: loaded.openIn ?? 'new-tab',
           fallbackToPowerShellExe: loaded.fallbackToPowerShellExe ?? true,
@@ -254,10 +256,42 @@ export default function RepoNavSettings(): JSX.Element {
     }
   }, [setToolState])
 
+  /* ── Commands (individual reusable commands) ─────────────────────────── */
+  const addCommand = useCallback(() => {
+    const id = `cmd-${Date.now()}`
+    const newCmd: RepoCommand = { id, name: '', command: '' }
+    setCfg((prev) => prev ? { ...prev, commands: [...prev.commands, newCmd] } : prev)
+  }, [])
+
+  const removeCommand = useCallback((cmdId: string) => {
+    setCfg((prev) => {
+      if (!prev) return prev
+      // Also remove references to this command from all templates
+      return {
+        ...prev,
+        commands: prev.commands.filter((c) => c.id !== cmdId),
+        commandTemplates: prev.commandTemplates.map((t) => ({
+          ...t,
+          commandIds: t.commandIds.filter((id) => id !== cmdId)
+        }))
+      }
+    })
+  }, [])
+
+  const updateCommand = useCallback((cmdId: string, field: 'name' | 'command', value: string) => {
+    setCfg((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        commands: prev.commands.map((c) => c.id === cmdId ? { ...c, [field]: value } : c)
+      }
+    })
+  }, [])
+
   /* ── Command Templates ────────────────────────────────────────────────── */
   const addTemplate = useCallback(() => {
-    const id = `cmd-${Date.now()}`
-    const newTpl: CommandTemplate = { id, label: '', description: '', steps: [] }
+    const id = `tpl-${Date.now()}`
+    const newTpl: CommandTemplate = { id, name: '', description: '', commandIds: [] }
     setCfg((prev) => prev ? { ...prev, commandTemplates: [...prev.commandTemplates, newTpl] } : prev)
   }, [])
 
@@ -275,7 +309,7 @@ export default function RepoNavSettings(): JSX.Element {
     })
   }, [])
 
-  const updateTemplateField = useCallback((index: number, field: 'id' | 'label' | 'description', value: string) => {
+  const updateTemplateField = useCallback((index: number, field: 'name' | 'description', value: string) => {
     setCfg((prev) => {
       if (!prev) return prev
       const templates = [...prev.commandTemplates]
@@ -284,53 +318,41 @@ export default function RepoNavSettings(): JSX.Element {
     })
   }, [])
 
-  // Step manipulation within a template
-  const addStep = useCallback((tplIndex: number, command: string) => {
-    const trimmed = command.trim()
-    if (!trimmed) return
+  // Add a command reference to a template's commandIds
+  const addCommandToTemplate = useCallback((tplIndex: number, cmdId: string) => {
+    if (!cmdId) return
     setCfg((prev) => {
       if (!prev) return prev
       const templates = [...prev.commandTemplates]
       templates[tplIndex] = {
         ...templates[tplIndex],
-        steps: [...templates[tplIndex].steps, trimmed]
+        commandIds: [...templates[tplIndex].commandIds, cmdId]
       }
       return { ...prev, commandTemplates: templates }
     })
   }, [])
 
-  const removeStep = useCallback((tplIndex: number, stepIndex: number) => {
+  const removeCommandFromTemplate = useCallback((tplIndex: number, stepIndex: number) => {
     setCfg((prev) => {
       if (!prev) return prev
       const templates = [...prev.commandTemplates]
       templates[tplIndex] = {
         ...templates[tplIndex],
-        steps: templates[tplIndex].steps.filter((_, i) => i !== stepIndex)
+        commandIds: templates[tplIndex].commandIds.filter((_, i) => i !== stepIndex)
       }
       return { ...prev, commandTemplates: templates }
     })
   }, [])
 
-  const updateStep = useCallback((tplIndex: number, stepIndex: number, value: string) => {
+  const moveCommandInTemplate = useCallback((tplIndex: number, stepIndex: number, dir: 'up' | 'down') => {
     setCfg((prev) => {
       if (!prev) return prev
       const templates = [...prev.commandTemplates]
-      const steps = [...templates[tplIndex].steps]
-      steps[stepIndex] = value
-      templates[tplIndex] = { ...templates[tplIndex], steps }
-      return { ...prev, commandTemplates: templates }
-    })
-  }, [])
-
-  const moveStep = useCallback((tplIndex: number, stepIndex: number, dir: 'up' | 'down') => {
-    setCfg((prev) => {
-      if (!prev) return prev
-      const templates = [...prev.commandTemplates]
-      const steps = [...templates[tplIndex].steps]
+      const ids = [...templates[tplIndex].commandIds]
       const target = dir === 'up' ? stepIndex - 1 : stepIndex + 1
-      if (target < 0 || target >= steps.length) return prev
-      ;[steps[stepIndex], steps[target]] = [steps[target], steps[stepIndex]]
-      templates[tplIndex] = { ...templates[tplIndex], steps }
+      if (target < 0 || target >= ids.length) return prev
+      ;[ids[stepIndex], ids[target]] = [ids[target], ids[stepIndex]]
+      templates[tplIndex] = { ...templates[tplIndex], commandIds: ids }
       return { ...prev, commandTemplates: templates }
     })
   }, [])
@@ -340,13 +362,12 @@ export default function RepoNavSettings(): JSX.Element {
     if (c.scanRoots.length === 0) return '至少需要一个扫描根目录'
     if (c.scanDepth < 1 || c.scanDepth > 10) return '扫描深度必须在 1-10 之间'
     if (c.commandTemplates.length === 0) return '至少需要一个命令模板'
-    const ids = c.commandTemplates.map((t) => t.id)
-    if (ids.some((id) => !id.trim())) return '模板 ID 不能为空'
-    if (new Set(ids).size !== ids.length) return '模板 ID 不能重复'
-    if (c.commandTemplates.some((t) => t.steps.length === 0)) return '每个模板至少需要一个执行步骤'
-    if (c.commandTemplates.some((t) => t.steps.some((s) => !s.trim()))) return '模板步骤不能为空'
-    if (!c.defaultTemplate || !ids.includes(c.defaultTemplate)) {
-      return '默认模板必须对应一个已存在的模板 ID'
+    const tplIds = c.commandTemplates.map((t) => t.id)
+    if (new Set(tplIds).size !== tplIds.length) return '模板 ID 不能重复（内部错误）'
+    if (c.commandTemplates.some((t) => !t.name.trim())) return '每个模板需要名称'
+    if (c.commandTemplates.some((t) => t.commandIds.length === 0)) return '每个模板至少选择一个命令'
+    if (!c.defaultTemplate || !tplIds.includes(c.defaultTemplate)) {
+      return '默认模板必须对应一个已存在的模板'
     }
     return null
   }, [])
@@ -493,32 +514,59 @@ export default function RepoNavSettings(): JSX.Element {
         </div>
       </Section>
 
-      {/* ─── 命令模板 ─── */}
-      <Section title="命令模板" icon="⌨️" label="启动命令">
-        {/* 命令模板 — 步骤式组合编辑器 */}
+      {/* ─── 命令配置 ─── */}
+      <Section title="命令配置" icon="⚙" label="命令" defaultOpen={false}>
         <div className="field">
-          <label className="field__label">命令模板</label>
+          <label className="field__label">命令配置（可复用）</label>
+          <div className="field__hint" style={{ marginBottom: 8 }}>
+            定义独立命令，然后在下方模板中组合使用。
+          </div>
+          {cfg.commands.map((cmd) => (
+            <div key={cmd.id} className="cmd-row">
+              <input
+                className="input cmd-row__name"
+                value={cmd.name}
+                onChange={(e) => updateCommand(cmd.id, 'name', e.target.value)}
+                placeholder="名称（如：Git 拉取）"
+              />
+              <input
+                className="input cmd-row__cmd"
+                value={cmd.command}
+                onChange={(e) => updateCommand(cmd.id, 'command', e.target.value)}
+                placeholder="命令（如：git pull）"
+                list="common-commands"
+              />
+              <button type="button" className="tpl-step__btn tpl-step__btn--del" onClick={() => removeCommand(cmd.id)} title="删除命令">×</button>
+            </div>
+          ))}
           <datalist id="common-commands">
             {COMMON_COMMANDS.map((c) => (
               <option key={c.command} value={c.command}>{c.label}</option>
             ))}
           </datalist>
+          <button type="button" className="btn btn--ghost" style={{ marginTop: 6, fontSize: 12 }} onClick={addCommand}>
+            + 添加命令
+          </button>
+        </div>
 
+        <div className="settings-divider" />
+      </Section>
+
+      {/* ─── 命令模板 ─── */}
+      <Section title="命令模板" icon="⌨️" label="模板" defaultOpen={false}>
+        {/* 命令模板 — 组合选择 */}
+        <div className="field">
+          <label className="field__label">命令模板（组合）</label>
+          <div className="field__hint" style={{ marginBottom: 8 }}>
+            每个模板由多个命令按顺序组合，点击仓库「打开」时依次执行。
+          </div>
           {cfg.commandTemplates.map((tpl, i) => (
             <div key={tpl.id || `tpl-${i}`} className="tpl-card">
-              {/* Template header: name + description + delete */}
               <div className="tpl-card__head">
                 <input
-                  className="input tpl-card__id"
-                  value={tpl.id}
-                  onChange={(e) => updateTemplateField(i, 'id', e.target.value)}
-                  placeholder="id"
-                  title="模板 ID（英文，唯一）"
-                />
-                <input
-                  className="input tpl-card__label"
-                  value={tpl.label}
-                  onChange={(e) => updateTemplateField(i, 'label', e.target.value)}
+                  className="input tpl-card__name"
+                  value={tpl.name}
+                  onChange={(e) => updateTemplateField(i, 'name', e.target.value)}
                   placeholder="名称（如：默认）"
                 />
                 <input
@@ -527,67 +575,44 @@ export default function RepoNavSettings(): JSX.Element {
                   onChange={(e) => updateTemplateField(i, 'description', e.target.value)}
                   placeholder="描述（可选）"
                 />
-                <button type="button" className="btn btn--ghost tpl-card__del" onClick={() => removeTemplate(i)} title="删除模板">
-                  删除
-                </button>
+                <button type="button" className="btn btn--ghost tpl-card__del" onClick={() => removeTemplate(i)} title="删除模板">删除</button>
               </div>
 
-              {/* Steps list */}
               <div className="tpl-steps">
-                <div className="tpl-steps__label">执行步骤（按顺序）:</div>
-                {tpl.steps.length === 0 && (
-                  <div className="tpl-steps__empty">暂无步骤，点击下方按钮添加</div>
+                <div className="tpl-steps__label">执行步骤:</div>
+                {tpl.commandIds.length === 0 && (
+                  <div className="tpl-steps__empty">暂无步骤，从下方下拉添加</div>
                 )}
-                {tpl.steps.map((step, si) => (
-                  <div key={si} className="tpl-step">
-                    <span className="tpl-step__num">{si + 1}</span>
-                    <input
-                      className="input tpl-step__cmd"
-                      value={step}
-                      onChange={(e) => updateStep(i, si, e.target.value)}
-                      placeholder="输入命令，如 git pull"
-                      list="common-commands"
-                    />
-                    <button type="button" className="tpl-step__btn" onClick={() => moveStep(i, si, 'up')} disabled={si === 0} title="上移">↑</button>
-                    <button type="button" className="tpl-step__btn" onClick={() => moveStep(i, si, 'down')} disabled={si === tpl.steps.length - 1} title="下移">↓</button>
-                    <button type="button" className="tpl-step__btn tpl-step__btn--del" onClick={() => removeStep(i, si)} title="删除">×</button>
-                  </div>
-                ))}
-
-                {/* Quick-add buttons for common commands */}
-                <div className="tpl-quick-add">
-                  {COMMON_COMMANDS.slice(0, 6).map((c) => (
-                    <button
-                      key={c.command}
-                      type="button"
-                      className="tpl-quick-add__btn"
-                      onClick={() => addStep(i, c.command)}
-                      title={c.command}
-                    >
-                      + {c.label}
-                    </button>
-                  ))}
-                  <input
-                    className="input tpl-quick-add__custom"
-                    placeholder="或输入自定义命令后回车"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        const val = (e.target as HTMLInputElement).value
-                        if (val.trim()) { addStep(i, val); (e.target as HTMLInputElement).value = '' }
-                      }
-                    }}
-                  />
+                {tpl.commandIds.map((cmdId, si) => {
+                  const cmd = cfg.commands.find((c) => c.id === cmdId)
+                  return (
+                    <div key={si} className="tpl-step">
+                      <span className="tpl-step__num">{si + 1}</span>
+                      <span className="tpl-step__name">{cmd?.name ?? '(已删除)'}</span>
+                      <span className="tpl-step__raw">{cmd?.command ?? ''}</span>
+                      <button type="button" className="tpl-step__btn" onClick={() => moveCommandInTemplate(i, si, 'up')} disabled={si === 0} title="上移">↑</button>
+                      <button type="button" className="tpl-step__btn" onClick={() => moveCommandInTemplate(i, si, 'down')} disabled={si === tpl.commandIds.length - 1} title="下移">↓</button>
+                      <button type="button" className="tpl-step__btn tpl-step__btn--del" onClick={() => removeCommandFromTemplate(i, si)} title="移除">×</button>
+                    </div>
+                  )
+                })}
+                {/* Add command via dropdown */}
+                <div className="tpl-add-cmd">
+                  <select
+                    className="select tpl-add-cmd__select"
+                    value=""
+                    onChange={(e) => { if (e.target.value) addCommandToTemplate(i, e.target.value); e.target.value = '' }}
+                  >
+                    <option value="">+ 选择命令添加…</option>
+                    {cfg.commands.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name} ({c.command})</option>
+                    ))}
+                  </select>
                 </div>
               </div>
             </div>
           ))}
-
-          <button
-            type="button"
-            className="btn btn--ghost"
-            style={{ marginTop: 8 }}
-            onClick={addTemplate}
-          >
+          <button type="button" className="btn btn--ghost" style={{ marginTop: 8, fontSize: 12 }} onClick={addTemplate}>
             + 添加模板
           </button>
         </div>
@@ -607,7 +632,7 @@ export default function RepoNavSettings(): JSX.Element {
             )}
             {cfg.commandTemplates.map((tpl) => (
               <option key={tpl.id} value={tpl.id}>
-                {tpl.label || tpl.id}
+                {tpl.name || '(未命名)'}
               </option>
             ))}
           </select>
@@ -616,7 +641,7 @@ export default function RepoNavSettings(): JSX.Element {
       </Section>
 
       {/* ─── 启动行为 ─── */}
-      <Section title="启动行为" icon="🚀" label="启动">
+      <Section title="启动行为" icon="🚀" label="启动" defaultOpen={false}>
         {/* 打开方式 */}
         <div className="field">
           <label className="field__label">打开方式</label>

@@ -170,11 +170,14 @@ export default function RepoNavView({
   const handleOpen = useCallback(async (repo: RepoEntry): Promise<void> => {
     if (!config) return
     const templates = config.commandTemplates ?? []
+    const commands = config.commands ?? []
     const selected = templates.find((t) => t.id === selectedTemplate) ?? templates[0]
-    // Join steps into a single shell command: ['git pull', 'opencode'] → 'git pull; opencode'
-    const command = selected?.steps?.length
-      ? selected.steps.join('; ')
-      : 'git pull; opencode'
+    // Resolve commandIds → command strings → join with '; '
+    const command = selected?.commandIds
+      ?.map((id) => commands.find((c) => c.id === id)?.command)
+      .filter((c): c is string => !!c)
+      .join('; ')
+      ?? 'git pull; opencode'
     const mode = config.openIn
 
     try {
@@ -222,7 +225,7 @@ export default function RepoNavView({
           )}
           {templates.map((tpl) => (
             <option key={tpl.id} value={tpl.id} title={tpl.description}>
-              {tpl.label || tpl.id}
+              {tpl.name || '(未命名)'}
             </option>
           ))}
         </select>

@@ -20,7 +20,7 @@ import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
 import type { RepoNavConfig } from '../../shared/repoNav'
-import { DEFAULT_TEMPLATES, migrateLegacyConfig } from '../../shared/repoNav'
+import { DEFAULT_TEMPLATES, DEFAULT_COMMANDS, migrateLegacyConfig } from '../../shared/repoNav'
 import { dataFilePath, legacyFilePath, migrateFromLegacy } from './paths'
 
 // ── Default values used when no config file exists ─────────────────────────
@@ -39,6 +39,7 @@ const DEFAULT_CONFIG: RepoNavConfig = {
     'vendor'
   ],
   commandTemplates: DEFAULT_TEMPLATES,
+  commands: DEFAULT_COMMANDS,
   defaultTemplate: 'default',
   openIn: 'new-tab',
   fallbackToPowerShellExe: true
