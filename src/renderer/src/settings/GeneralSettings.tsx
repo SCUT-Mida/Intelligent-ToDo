@@ -36,12 +36,14 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
   const [selectHint, setSelectHint] = useState<string | null>(null)
 
   // Manual config fields (fallback when opencode.json isn't available)
-  // New config form state (for adding a saved profile)
-  const [newName, setNewName] = useState('')
-  const [newUrl, setNewUrl] = useState('')
-  const [newKey, setNewKey] = useState('')
-  const [newModel, setNewModel] = useState('')
-  const [showNewKey, setShowNewKey] = useState(false)
+  // Config modal state (for add/edit saved configs)
+  const [configModalOpen, setConfigModalOpen] = useState(false)
+  const [editingConfigId, setEditingConfigId] = useState<string | null>(null)
+  const [modalName, setModalName] = useState('')
+  const [modalUrl, setModalUrl] = useState('')
+  const [modalKey, setModalKey] = useState('')
+  const [modalModel, setModalModel] = useState('')
+  const [showModalKey, setShowModalKey] = useState(false)
   const [configHint, setConfigHint] = useState<string | null>(null)
 
   const [appStatus, setAppStatus] = useState<{ version: string; isPackaged: boolean } | null>(null)
@@ -119,11 +121,8 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
       apiKey: provider.apiKey,
       model: modelEntry.modelId
     })
-    // Clear the new-config form (if user was typing) since they picked an existing one
-    setNewUrl('')
-    setNewKey('')
-    setNewModel('')
-    setNewName('')
+    // Clear the modal form (if it was open) since user picked from opencode
+    setConfigModalOpen(false)
 
     setSelectHint(`✓ 已切换到 ${provider.displayName} / ${modelEntry.displayName ?? modelEntry.modelId}`)
     window.setTimeout(() => setSelectHint(null), 3000)
@@ -167,33 +166,69 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
       config.model === saved.model
   }, [config])
 
-  const handleAddConfig = useCallback((): void => {
-    const name = newName.trim()
-    const url = newUrl.trim()
-    const model = newModel.trim()
+  // Open modal for creating a new config
+  const openNewConfig = useCallback((): void => {
+    setEditingConfigId(null)
+    setModalName('')
+    setModalUrl('')
+    setModalKey('')
+    setModalModel('')
+    setShowModalKey(false)
+    setConfigModalOpen(true)
+  }, [])
+
+  // Open modal for editing an existing config
+  const openEditConfig = useCallback((saved: SavedAiConfig): void => {
+    setEditingConfigId(saved.id)
+    setModalName(saved.name)
+    setModalUrl(saved.apiUrl)
+    setModalKey(saved.apiKey)
+    setModalModel(saved.model)
+    setShowModalKey(false)
+    setConfigModalOpen(true)
+  }, [])
+
+  // Save from modal (handles both create and update)
+  const handleSaveFromModal = useCallback((): void => {
+    const name = modalName.trim()
+    const url = modalUrl.trim()
+    const model = modalModel.trim()
     if (!url || !model) {
       setConfigHint('⚠️ API 地址和模型名称不能为空')
       window.setTimeout(() => setConfigHint(null), 4000)
       return
     }
-    const newConfig: SavedAiConfig = {
-      id: `ai-${Date.now()}`,
-      name: name || model,
-      apiUrl: url,
-      apiKey: newKey.trim(),
-      model
+
+    if (editingConfigId) {
+      // Update existing
+      const updated = savedConfigs.map((c) =>
+        c.id === editingConfigId
+          ? { ...c, name: name || model, apiUrl: url, apiKey: modalKey.trim(), model }
+          : c
+      )
+      dispatch({ type: 'SET_DATA', payload: { ...state.data, savedAiConfigs: updated } })
+      // If the edited config was active, update the active config too
+      const wasActive = isConfigActive(savedConfigs.find((c) => c.id === editingConfigId)!)
+      if (wasActive) {
+        onSave({ apiUrl: url, apiKey: modalKey.trim(), model })
+      }
+      setConfigHint(`✓ 已更新「${name || model}」`)
+    } else {
+      // Create new
+      const newConfig: SavedAiConfig = {
+        id: `ai-${Date.now()}`,
+        name: name || model,
+        apiUrl: url,
+        apiKey: modalKey.trim(),
+        model
+      }
+      dispatch({ type: 'SET_DATA', payload: { ...state.data, savedAiConfigs: [...savedConfigs, newConfig] } })
+      onSave({ apiUrl: url, apiKey: modalKey.trim(), model })
+      setConfigHint(`✓ 已保存并切换到「${newConfig.name}」`)
     }
-    // Save to AppData + set as active
-    dispatch({ type: 'SET_DATA', payload: { ...state.data, savedAiConfigs: [...savedConfigs, newConfig] } })
-    onSave({ apiUrl: url, apiKey: newKey.trim(), model })
-    // Clear form
-    setNewName('')
-    setNewUrl('')
-    setNewKey('')
-    setNewModel('')
-    setConfigHint(`✓ 已保存并切换到「${newConfig.name}」`)
     window.setTimeout(() => setConfigHint(null), 3000)
-  }, [newName, newUrl, newKey, newModel, savedConfigs, state.data, dispatch, onSave])
+    setConfigModalOpen(false)
+  }, [editingConfigId, modalName, modalUrl, modalKey, modalModel, savedConfigs, state.data, dispatch, onSave, isConfigActive])
 
   const handleSelectConfig = useCallback((saved: SavedAiConfig): void => {
     if (isConfigActive(saved)) return
@@ -338,12 +373,16 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
           )}
         </div>
 
-        {/* Saved configs list + add new */}
+        {/* 手工配置 — saved profiles list + 新增 button */}
         <div className="settings-divider" />
         <div className="field">
-          <label className="field__label">已保存的配置</label>
+          <div className="field__row" style={{ marginBottom: 8 }}>
+            <label className="field__label" style={{ marginBottom: 0 }}>手工配置</label>
+            <button type="button" className="btn btn--ghost" style={{ flexShrink: 0, fontSize: 12 }} onClick={openNewConfig}>
+              + 新增
+            </button>
+          </div>
 
-          {/* List of saved configs */}
           {savedConfigs.length > 0 ? (
             <div className="saved-config-list">
               {savedConfigs.map((saved) => {
@@ -362,6 +401,12 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
                     </button>
                     <button
                       type="button"
+                      className="saved-config__edit"
+                      onClick={() => openEditConfig(saved)}
+                      title="编辑"
+                    >✎</button>
+                    <button
+                      type="button"
                       className="saved-config__del"
                       onClick={() => handleDeleteConfig(saved.id)}
                       title="删除"
@@ -371,38 +416,63 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
               })}
             </div>
           ) : (
-            <div className="field__hint" style={{ marginBottom: 10 }}>
-              还没有保存的配置。在下方添加一个，或从 opencode.json 选择。
+            <div className="field__hint">
+              暂无手工配置。点击「+ 新增」添加一个。
             </div>
           )}
 
-          {/* Add new config form */}
-          <div className="saved-config-form">
-            <div className="field__hint" style={{ marginBottom: 6 }}>添加新配置：</div>
-            <input className="input" placeholder="名称（如：DeepSeek）" value={newName}
-              onChange={(e) => setNewName(e.target.value)} style={{ marginBottom: 6 }} />
-            <input className="input" placeholder="API 地址 (https://api.openai.com/v1)" value={newUrl}
-              onChange={(e) => setNewUrl(e.target.value)} style={{ marginBottom: 6 }} />
-            <div className="field__row" style={{ marginBottom: 6 }}>
-              <input className="input" type={showNewKey ? 'text' : 'password'} placeholder="API Key (sk-...)"
-                value={newKey} onChange={(e) => setNewKey(e.target.value)} />
-              <button type="button" className="btn btn--ghost" style={{ flexShrink: 0 }}
-                onClick={() => setShowNewKey((v) => !v)}>{showNewKey ? '隐藏' : '显示'}</button>
+          {configHint && (
+            <div className={`field__hint ${configHint.startsWith('✓') ? 'field__hint--success' : 'field__hint--error'}`} style={{ marginTop: 6 }}>
+              {configHint}
             </div>
-            <input className="input" placeholder="模型名称 (gpt-4o-mini)" value={newModel}
-              onChange={(e) => setNewModel(e.target.value)} style={{ marginBottom: 8 }} />
-            <button type="button" className="btn btn--primary" onClick={handleAddConfig}
-              disabled={!newUrl.trim() || !newModel.trim()}>
-              + 保存并使用
-            </button>
-            {configHint && (
-              <div className={`field__hint ${configHint.startsWith('✓') ? 'field__hint--success' : 'field__hint--error'}`} style={{ marginTop: 6 }}>
-                {configHint}
-              </div>
-            )}
-          </div>
+          )}
         </div>
       </Section>
+
+      {/* Config add/edit modal */}
+      {configModalOpen && (
+        <div className="overlay" onMouseDown={() => setConfigModalOpen(false)}>
+          <div className="modal" style={{ width: 420 }} onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal__header">
+              <div className="modal__title">{editingConfigId ? '编辑配置' : '新增配置'}</div>
+              <button className="modal__close" onClick={() => setConfigModalOpen(false)} aria-label="关闭">×</button>
+            </div>
+            <div className="modal__body">
+              <div className="field">
+                <label className="field__label">名称</label>
+                <input className="input" placeholder="如：DeepSeek" value={modalName}
+                  onChange={(e) => setModalName(e.target.value)} autoFocus />
+              </div>
+              <div className="field">
+                <label className="field__label">API 地址 (Base URL)</label>
+                <input className="input" placeholder="https://api.openai.com/v1" value={modalUrl}
+                  onChange={(e) => setModalUrl(e.target.value)} />
+              </div>
+              <div className="field">
+                <label className="field__label">API Key</label>
+                <div className="field__row">
+                  <input className="input" type={showModalKey ? 'text' : 'password'} placeholder="sk-..."
+                    value={modalKey} onChange={(e) => setModalKey(e.target.value)} />
+                  <button type="button" className="btn btn--ghost" style={{ flexShrink: 0 }}
+                    onClick={() => setShowModalKey((v) => !v)}>{showModalKey ? '隐藏' : '显示'}</button>
+                </div>
+              </div>
+              <div className="field">
+                <label className="field__label">模型名称 (Model)</label>
+                <input className="input" placeholder="gpt-4o-mini" value={modalModel}
+                  onChange={(e) => setModalModel(e.target.value)} />
+              </div>
+            </div>
+            <div className="modal__footer">
+              <button className="btn btn--ghost" onClick={() => setConfigModalOpen(false)}>取消</button>
+              <button className="btn btn--primary" onClick={handleSaveFromModal}
+                disabled={!modalUrl.trim() || !modalModel.trim()}>
+                {editingConfigId ? '保存修改' : '保存并使用'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 应用更新 */}
       <Section title="应用更新" icon="🔄" label="应用" defaultOpen={false}>

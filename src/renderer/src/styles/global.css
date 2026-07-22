@@ -3890,6 +3890,25 @@ select {
   color: var(--danger);
 }
 
+.saved-config__edit {
+  width: 32px;
+  height: 100%;
+  min-height: 38px;
+  background: none;
+  border: none;
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.saved-config__edit:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
 .saved-config-form {
   padding: 10px 12px;
   background: #fafbfc;
