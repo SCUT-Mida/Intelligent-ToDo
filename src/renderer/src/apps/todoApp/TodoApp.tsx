@@ -7,6 +7,8 @@ import QuadrantBoard from '../../components/QuadrantBoard'
 import TodayPriorityView from '../../components/TodayPriorityView'
 import CalendarView from '../../components/CalendarView'
 import PomodoroView from '../../components/PomodoroView'
+import GuideModal from '../../components/GuideModal'
+import { TODO_GUIDE } from '../../guides/todoGuide'
 import { generateMarkdown, defaultMdFileName } from '../../lib/markdown'
 
 type TodoView = 'board' | 'priority' | 'calendar' | 'pomodoro'
@@ -35,6 +37,7 @@ export default function TodoApp(): JSX.Element {
 
   const [todoView, setTodoView] = useState<TodoView>('board')
   const [taskModal, setTaskModal] = useState<{ task: Task | null; quadrant: Quadrant } | null>(null)
+  const [guideOpen, setGuideOpen] = useState(false)
   const [aiState, setAiState] = useState<AiState>({ kind: 'idle' })
 
   // ---- derived ----
@@ -158,6 +161,20 @@ export default function TodoApp(): JSX.Element {
 
   const deleteTask = useCallback((id: string): void => {
     dispatch({ type: 'SET_DATA', payload: { ...state.data, tasks: state.data.tasks.filter((t) => t.id !== id) } })
+  }, [state.data, dispatch])
+
+  // Move a task to a different quadrant (drag-and-drop on the board)
+  const handleMoveTask = useCallback((taskId: string, targetQuadrant: Quadrant): void => {
+    const now = new Date().toISOString()
+    dispatch({
+      type: 'SET_DATA',
+      payload: {
+        ...state.data,
+        tasks: state.data.tasks.map((t) =>
+          t.id === taskId ? { ...t, quadrant: targetQuadrant, updatedAt: now } : t
+        )
+      }
+    })
   }, [state.data, dispatch])
 
   // ---- AI priority ops ----
@@ -368,6 +385,13 @@ export default function TodoApp(): JSX.Element {
           + 新建任务
         </button>
         <div className="toolbar__spacer" />
+        <button
+          className="toolbar__help-btn"
+          onClick={() => setGuideOpen(true)}
+          title="使用指南"
+        >
+          ?
+        </button>
         <div className="toolbar__stats">
           <span>待办 <b>{pendingTasks}</b></span>
           <span>已完成 <b>{doneTasks}</b></span>
@@ -384,6 +408,7 @@ export default function TodoApp(): JSX.Element {
             onEdit={(t) => setTaskModal({ task: t, quadrant: t.quadrant })}
             onDelete={deleteTask}
             onAddTask={(q) => setTaskModal({ task: null, quadrant: q })}
+            onMoveTask={handleMoveTask}
           />
         )}
 
@@ -429,6 +454,9 @@ export default function TodoApp(): JSX.Element {
           onSave={handleSaveTask}
           onClose={() => setTaskModal(null)}
         />
+      )}
+      {guideOpen && (
+        <GuideModal title="智能代办使用指南" content={TODO_GUIDE} onClose={() => setGuideOpen(false)} />
       )}
     </div>
   )

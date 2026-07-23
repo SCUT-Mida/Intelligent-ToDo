@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import RepoNavView from '../../components/RepoNav/RepoNavView'
 import AiMemoryWizard from './AiMemoryWizard'
+import GuideModal from '../../components/GuideModal'
+import { REPO_NAV_GUIDE } from '../../guides/repoNavGuide'
 import type { RepoUserData } from '@shared/repoNav'
 
 interface RepoMemoryEntry {
@@ -30,6 +32,7 @@ export default function RepoNavApp(): JSX.Element {
   const [memory, setMemory] = useState<RepoMemoryData | null>(null)
   const [memoryLoading, setMemoryLoading] = useState(true)
   const [wizardOpen, setWizardOpen] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(false)
   const [scanKey, setScanKey] = useState(0)
 
   const [userData, setUserData] = useState<RepoUserData | null>(null)
@@ -159,6 +162,14 @@ export default function RepoNavApp(): JSX.Element {
         >
           {memory && memory.entries.length > 0 ? '重新生成' : '生成 AI 记忆'}
         </button>
+        <button
+          className="toolbar__help-btn"
+          onClick={() => setGuideOpen(true)}
+          title="使用指南"
+          style={{ marginLeft: 'auto' }}
+        >
+          ?
+        </button>
       </div>
 
       <RepoNavView
@@ -176,6 +187,10 @@ export default function RepoNavApp(): JSX.Element {
           onSuccess={handleMemoryGenerated}
           onClose={() => setWizardOpen(false)}
         />
+      )}
+
+      {guideOpen && (
+        <GuideModal title="仓库导航使用指南" content={REPO_NAV_GUIDE} onClose={() => setGuideOpen(false)} />
       )}
     </div>
   )

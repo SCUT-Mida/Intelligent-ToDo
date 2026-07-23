@@ -4,17 +4,13 @@ import { QUADRANTS } from '@shared/types'
 import { formatRecurrence } from '@shared/recurrence'
 
 interface QuadrantBoardProps {
-  /** All tasks; the component filters by quadrant internally */
   tasks: Task[]
-  /** Toggle task completion */
   onToggle: (id: string) => void
-  /** Edit an existing task */
   onEdit: (task: Task) => void
-  /** Delete a task */
   onDelete: (id: string) => void
-  /** Add a new task in a specific quadrant. When undefined, the "+" buttons are hidden. */
   onAddTask?: (quadrant: Quadrant) => void
-  /** Compact mode: denser layout, hides add buttons and task actions. Default false. */
+  /** Move a task to a different quadrant (drag-and-drop). Only in non-compact mode. */
+  onMoveTask?: (taskId: string, targetQuadrant: Quadrant) => void
   compact?: boolean
 }
 
@@ -53,12 +49,15 @@ export default function QuadrantBoard({
   onEdit,
   onDelete,
   onAddTask,
+  onMoveTask,
   compact = false
 }: QuadrantBoardProps): JSX.Element {
   // Hide-completed toggle (per-board, default ON = hide completed).
-  // Compact mode (used by TodayPriorityView sidebar) always shows everything
-  // because the priority view already filters by its own logic.
   const [hideCompleted, setHideCompleted] = useState(true)
+  // Drag-and-drop state (only in non-compact mode)
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
+  const [dragOverQuadrant, setDragOverQuadrant] = useState<Quadrant | null>(null)
+  const canDrag = !compact && !!onMoveTask
   const containerClass = compact ? 'quadrant-board quadrant-board--compact' : 'board'
 
   // Pre-filter: drop completed tasks when hideCompleted is on. Counts in
@@ -97,7 +96,27 @@ export default function QuadrantBoard({
             return a.dueDate.localeCompare(b.dueDate)
           })
         return (
-          <section key={q.id} className={`quadrant quadrant--${q.id}`}>
+          <section
+            key={q.id}
+            className={`quadrant quadrant--${q.id} ${dragOverQuadrant === q.id ? 'quadrant--drag-over' : ''}`}
+            onDragOver={canDrag ? (e) => {
+              if (!draggedTaskId) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              if (dragOverQuadrant !== q.id) setDragOverQuadrant(q.id)
+            } : undefined}
+            onDragLeave={canDrag ? () => {
+              setDragOverQuadrant((prev) => prev === q.id ? null : prev)
+            } : undefined}
+            onDrop={canDrag ? (e) => {
+              e.preventDefault()
+              if (draggedTaskId) {
+                onMoveTask?.(draggedTaskId, q.id)
+              }
+              setDraggedTaskId(null)
+              setDragOverQuadrant(null)
+            } : undefined}
+          >
             <div className="quadrant__header">
               <div className="quadrant__titles">
                 <span className="quadrant__title">{q.title}</span>
@@ -121,7 +140,19 @@ export default function QuadrantBoard({
                 list.map((t) => {
                   const ds = dueState(t.dueDate)
                   return (
-                    <div key={t.id} className={`task ${t.completed ? 'task--done' : ''}`}>
+                    <div
+                      key={t.id}
+                      className={`task ${t.completed ? 'task--done' : ''} ${draggedTaskId === t.id ? 'task--dragging' : ''}`}
+                      draggable={canDrag}
+                      onDragStart={canDrag ? (e) => {
+                        setDraggedTaskId(t.id)
+                        e.dataTransfer.effectAllowed = 'move'
+                      } : undefined}
+                      onDragEnd={canDrag ? () => {
+                        setDraggedTaskId(null)
+                        setDragOverQuadrant(null)
+                      } : undefined}
+                    >
                       <input
                         type="checkbox"
                         className="task__check"

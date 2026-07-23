@@ -356,6 +356,23 @@ select {
   color: var(--text-faint);
 }
 
+/* Drag-and-drop feedback */
+.task--dragging {
+  opacity: 0.4;
+  cursor: grabbing !important;
+}
+
+.task[draggable]:not(.task--dragging) {
+  cursor: grab;
+}
+
+.quadrant--drag-over {
+  background: var(--primary-soft) !important;
+  border-color: var(--primary) !important;
+  border-style: dashed !important;
+  border-width: 2px !important;
+}
+
 .task__meta {
   display: flex;
   align-items: center;
@@ -3640,6 +3657,92 @@ select {
 }
 
 /* AI config — empty state */
+
+/* Help button (?) — shared by TodoApp toolbar and RepoNavApp memory bar */
+.toolbar__help-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.toolbar__help-btn:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+/* Guide modal */
+.guide-modal {
+  width: 520px !important;
+  max-width: calc(100vw - 40px);
+}
+
+.guide-modal__body {
+  max-height: 60vh;
+  overflow-y: auto;
+  line-height: 1.7;
+}
+
+.guide__h1 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+
+.guide__h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 18px;
+  margin-bottom: 8px;
+}
+
+.guide__h3 {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-top: 14px;
+  margin-bottom: 6px;
+}
+
+.guide__p {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.guide__ul {
+  padding-left: 20px;
+  margin-bottom: 10px;
+}
+
+.guide__li {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.guide__code {
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--text);
+}
 .ai-import-empty {
   padding: 14px 8px;
   display: flex;
