@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import type { RepoEntry, RepoNavConfig, RepoIndex, RepoUserData } from '@shared/repoNav'
 import RepoCard from './RepoCard'
+import { useScanManager } from '../../lib/scanManager'
 
 type ViewTab = 'all' | 'favorites'
 
@@ -47,14 +48,18 @@ export default function RepoNavView({
   const [filter, setFilter] = useState('')
   const [config, setConfig] = useState<RepoNavConfig | null>(null)
   const [selectedTemplate, setSelectedTemplate] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [initialLoad, setInitialLoad] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const [cachedAt, setCachedAt] = useState<string | null>(null)
   const [viewTab, setViewTab] = useState<ViewTab>('all')
-  const [scanProgress, setScanProgress] = useState<{ current: number; total: number; name: string } | null>(null)
+  // Scan state is module-level (survives component unmount/remount)
+  const { scanState, startScan } = useScanManager()
+  const scanProgress = scanState.progress
+  // loading is derived: true during initial cache load OR during scan
+  const loading = initialLoad || scanState.isScanning
 
-  // Load config on mount, then load cached index (or scan on first run)
+  // Load config on mount, then load cached index
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -69,27 +74,52 @@ export default function RepoNavView({
         if (cached && cached.repos.length > 0) {
           setRepos(cached.repos)
           setCachedAt(cached.generatedAt)
-          setLoading(false)
+          setInitialLoad(false)
           return
         }
 
-        setLoading(true)
-        setScanProgress({ current: 0, total: 0, name: '正在发现仓库...' })
-        const unsubInit = window.repoNav.onScanProgress((p) => { if (!cancelled) setScanProgress(p) })
-        const result = await window.repoNav.scan()
-        unsubInit()
-        if (cancelled) return
-        setRepos(result.index.repos)
-        setCachedAt(result.index.generatedAt)
-        setLoading(false)
+        // Cache miss: if no scan in progress, start one.
+        // If a scan IS in progress (from a previous mount), just wait —
+        // the scanCompletionEffect below will reload cache when it finishes.
+        setInitialLoad(false)
+        if (!scanState.isScanning) {
+          void startScan()
+        }
       } catch (e) {
         if (cancelled) return
         setError('加载失败: ' + (e instanceof Error ? e.message : String(e)))
-        setLoading(false)
+        setInitialLoad(false)
       }
     })()
     return () => { cancelled = true }
   }, [])
+
+  // Detect scan completion: when isScanning transitions true→false,
+  // reload the cached index to pick up fresh results. Works even if
+  // the component was unmounted during the scan — on remount, the
+  // mount effect loads the cache, and this effect handles subsequent
+  // completions.
+  const prevScanningRef = useRef(false)
+  useEffect(() => {
+    const wasScanning = prevScanningRef.current
+    prevScanningRef.current = scanState.isScanning
+
+    if (wasScanning && !scanState.isScanning) {
+      // Scan just completed — reload cache
+      void (async () => {
+        try {
+          const cached = await window.repoNav.loadCachedIndex()
+          if (cached && cached.repos.length > 0) {
+            setRepos(cached.repos)
+            setCachedAt(cached.generatedAt)
+          }
+          showToast(`已刷新（${cached?.repos.length ?? 0} 个仓库）`, 'success')
+        } catch (e) {
+          setError('刷新后加载失败: ' + (e instanceof Error ? e.message : String(e)))
+        }
+      })()
+    }
+  }, [scanState.isScanning])
 
   /**
    * Compute the final filtered + sorted repo list.
@@ -157,24 +187,13 @@ export default function RepoNavView({
   }, [repos, viewTab, filter, userData, memoryMap])
 
   const handleRefresh = useCallback(async (): Promise<void> => {
-    setLoading(true)
     setError(null)
-    setScanProgress({ current: 0, total: 0, name: '正在发现仓库...' })
-    // Subscribe to progress events during scan
-    const unsub = window.repoNav.onScanProgress((p) => setScanProgress(p))
-    try {
-      const result = await window.repoNav.scan()
-      setRepos(result.index.repos)
-      setCachedAt(result.index.generatedAt)
-      showToast(`已刷新（${result.index.repos.length} 个仓库）`, 'success')
-    } catch (e) {
-      setError('扫描仓库失败: ' + (e instanceof Error ? e.message : String(e)))
-    } finally {
-      unsub()
-      setScanProgress(null)
-      setLoading(false)
-    }
-  }, [])
+    await startScan()
+    // Cache reload + toast happens in the scanCompletionEffect above
+    // when scanState.isScanning transitions true → false.
+    // This works even if the user switches tabs during the scan —
+    // on remount, the mount effect picks up the fresh cached index.
+  }, [startScan])
 
   const handleOpen = useCallback(async (repo: RepoEntry): Promise<void> => {
     if (!config) return
