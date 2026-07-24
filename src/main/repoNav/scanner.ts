@@ -22,8 +22,8 @@ import { logger } from '../logger'
 
 const execFileAsync = promisify(execFile)
 
-/** Number of repos to enrich in parallel per batch. */
-const BATCH_SIZE = 10
+/** Number of repos to enrich in parallel per batch. Smaller = more frequent yields. */
+const BATCH_SIZE = 5
 
 /** Progress callback: (currentReposEnriched, totalReposDiscovered, currentRepoName). */
 export type ScanProgressCallback = (current: number, total: number, repoName: string) => void
@@ -95,18 +95,24 @@ function getSubDirs(dirPath: string): string[] {
   }
 }
 
-// ── Phase 1: BFS traversal (synchronous, fast) ─────────────────────────────
+// ── Phase 1: BFS traversal (async with periodic yields) ────────────────────
 
 /**
  * Walk the scan roots via BFS and collect all directories containing .git.
- * This phase is intentionally synchronous — it's just readdirSync/statSync,
- * which completes in milliseconds even for hundreds of directories.
+ * Async with periodic yields (every YIELD_INTERVAL directories) so the main
+ * process event loop stays responsive — other IPC calls (Todo app, window
+ * repaint) can be served during traversal.
  */
-function discoverRepos(config: RepoNavConfig): DiscoveredRepo[] {
+async function discoverRepos(
+  config: RepoNavConfig,
+  onProgress?: ScanProgressCallback
+): Promise<DiscoveredRepo[]> {
   const scanRoots = Array.isArray(config.scanRoots) ? config.scanRoots : []
   const scanDepth = typeof config.scanDepth === 'number' && config.scanDepth >= 1 ? config.scanDepth : 3
   const excludePatterns = Array.isArray(config.excludePatterns) ? config.excludePatterns : []
   const discovered: DiscoveredRepo[] = []
+  let dirsProcessed = 0
+  const YIELD_INTERVAL = 50
 
   for (const root of scanRoots) {
     try { statSync(root) } catch { continue }
@@ -126,6 +132,15 @@ function discoverRepos(config: RepoNavConfig): DiscoveredRepo[] {
         for (const subDir of getSubDirs(current.path)) {
           queue.push({ path: subDir, depth: current.depth + 1, scanRoot: current.scanRoot })
         }
+      }
+
+      // Yield to the event loop periodically so other IPC calls can be served.
+      // Without this, a deep directory tree (thousands of dirs including
+      // node_modules subtrees) freezes the main process for seconds.
+      dirsProcessed++
+      if (dirsProcessed % YIELD_INTERVAL === 0) {
+        onProgress?.(0, 0, `正在遍历目录... (${dirsProcessed} 个目录, ${discovered.length} 个仓库)`)
+        await new Promise((resolve) => setImmediate(resolve))
       }
     }
   }
@@ -182,8 +197,9 @@ export async function scanRepos(config: RepoNavConfig, onProgress?: ScanProgress
     gitBinary
   })
 
-  // Phase 1: discover all repos (synchronous, fast)
-  const discovered = discoverRepos(config)
+  // Phase 1: discover all repos (async with periodic yields)
+  onProgress?.(0, 0, '正在遍历目录...')
+  const discovered = await discoverRepos(config, onProgress)
   logger.info('scanner', 'phase 1 complete (BFS discovery)', { discovered: discovered.length })
 
   if (discovered.length === 0) {
