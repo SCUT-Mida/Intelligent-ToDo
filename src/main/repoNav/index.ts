@@ -62,10 +62,10 @@ function getAIConfig(): { apiUrl: string; apiKey: string; model: string } | null
  * @param ipc - The Electron ipcMain singleton (pass the imported instance).
  */
 export function registerRepoNavIpc(ipc: typeof ipcMain): void {
-  // ── SCAN: rebuild the repo index ──────────────────────────────────────
+  // ── SCAN: rebuild the repo index + optional memory auto-generation ────
   // Async + batched: the scanner yields between batches so the main process
-  // stays responsive (Todo app IPC works during scan). Progress is pushed
-  // to the renderer via webContents.send for the progress bar.
+  // stays responsive. After scan: cleans stale memory entries and auto-
+  // generates new memory if config.autoGenerateMemory is true.
   ipc.handle(IPC.SCAN, async (event) => {
     const config = getConfig()
     const sender = event.sender
@@ -76,6 +76,58 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
         }
       } catch { /* ignore send errors */ }
     })
+
+    // Phase 3: Clean up stale memory entries — remove repos that no longer
+    // exist in the scanned index (deleted, moved, renamed). Always runs,
+    // even if autoGenerateMemory is off.
+    const existingMemory = loadMemory()
+    if (existingMemory && existingMemory.entries.length > 0) {
+      const validPaths = new Set(index.repos.map((r) => r.path))
+      const cleanedEntries = existingMemory.entries.filter((e) => validPaths.has(e.path))
+      if (cleanedEntries.length !== existingMemory.entries.length) {
+        saveMemory({ ...existingMemory, entries: cleanedEntries })
+        logger.info('ipc', 'SCAN: cleaned stale memory entries', {
+          before: existingMemory.entries.length,
+          after: cleanedEntries.length,
+          removed: existingMemory.entries.length - cleanedEntries.length
+        })
+      }
+    }
+
+    // Phase 4: Auto-generate memory if configured AND AI is available.
+    // This extends the scan duration by 30-60s but the progress bar stays
+    // visible with a clear "正在生成 AI 记忆" message. Non-fatal on failure.
+    if (config.autoGenerateMemory) {
+      const aiConfig = getAIConfig()
+      if (aiConfig) {
+        if (!sender.isDestroyed()) {
+          sender.send('repoNav:scanProgress', {
+            current: 0,
+            total: index.repos.length,
+            name: '扫描完成，正在生成 AI 记忆（读取 README + 调用 LLM）...'
+          })
+        }
+        try {
+          const entries = await generateMemoryEntries(index.repos, config, aiConfig)
+          const memory: RepoMemory = {
+            version: 1,
+            generatedAt: new Date().toISOString(),
+            entries
+          }
+          saveMemory(memory)
+          logger.info('ipc', 'SCAN: auto memory generated', { entries: entries.length })
+        } catch (err) {
+          logger.error('ipc', 'SCAN: auto memory generation failed', {
+            error: err instanceof Error ? err.message : String(err)
+          })
+          // Non-fatal — scan succeeded, memory generation just didn't complete.
+          // User can manually click "重新生成" later.
+        }
+      } else {
+        logger.warn('ipc', 'SCAN: autoGenerateMemory is on but AI not configured, skipping')
+      }
+    }
+
     return { index, durationMs: 0 }
   })
 
