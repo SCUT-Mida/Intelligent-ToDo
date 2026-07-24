@@ -216,10 +216,10 @@ export default function TodoApp(): JSX.Element {
       dispatch({ type: 'SET_DATA', payload: { ...prev, priorities: [...filtered, newPriority] } })
       setAiState({ kind: 'idle' })
     } catch (e) {
-      // Check if this was a user-initiated cancel
+      // Check if this was a user-initiated cancel or timeout
       const msg = e instanceof Error ? e.message : String(e)
-      if (msg.includes('超时') || msg.includes('timeout') || msg.includes('abort') || msg.includes('Abort')) {
-        setAiState({ kind: 'idle' })  // silent return to idle on cancel
+      if (msg === '__CANCELLED__' || msg.includes('超时') || msg.includes('timeout') || msg.includes('abort') || msg.includes('Abort')) {
+        setAiState({ kind: 'idle' })  // silent return to idle on cancel/timeout
       } else {
         setAiState({ kind: 'error', message: msg })
       }

@@ -275,16 +275,53 @@ async function aiRecommend(
     '}\n\n' +
     '注意：taskId 字段必须精确匹配上方任务列表中 [ID: xxx] 的值，不要编造 ID。'
 
-  // Timeout + external cancel support. The controller is ours; if either the
-  // timeout fires OR the external signal (from renderer's "取消" button)
-  // aborts, the fetch throws AbortError.
+  // ── Build request body ──
+  const requestBody = {
+    model: config.model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ],
+    temperature: 0.6,
+    stream: false
+  }
+  const bodyStr = JSON.stringify(requestBody)
+
+  // Log the full request (URL + model + prompt lengths + body structure)
+  // for debugging "works in other tools but not here" issues.
+  logger.info('aiRecommend', 'LLM request sending', {
+    url,
+    model: config.model,
+    temperature: requestBody.temperature,
+    systemPromptLength: systemPrompt.length,
+    userPromptLength: userPrompt.length,
+    totalBodySize: bodyStr.length,
+    systemPromptPreview: systemPrompt.slice(0, 200),
+    userPromptPreview: userPrompt.slice(0, 500),
+    taskCount: incomplete.length
+  })
+
+  // Timeout + external cancel support.
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 60000)
+  const HARD_TIMEOUT_MS = 60000
+
+  // Intermediate "slow response" warnings — logged but don't abort.
+  // These help diagnose "model works elsewhere but is slow here" cases.
+  const slowWarn1 = setTimeout(() => {
+    logger.warn('aiRecommend', 'response taking >15s, model may be slow or incompatible')
+  }, 15000)
+  const slowWarn2 = setTimeout(() => {
+    logger.warn('aiRecommend', 'response taking >30s, consider canceling and switching models')
+  }, 30000)
+
+  const timeout = setTimeout(() => controller.abort(), HARD_TIMEOUT_MS)
   if (externalSignal) {
     if (externalSignal.aborted) controller.abort()
     else externalSignal.addEventListener('abort', () => controller.abort(), { once: true })
   }
+
   let resp: NetResponse
+  const fetchStartTime = Date.now()
   try {
     resp = await netFetch(url, {
       method: 'POST',
@@ -292,43 +329,70 @@ async function aiRecommend(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${config.apiKey}`
       },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.6,
-        stream: false
-      }),
+      body: bodyStr,
       signal: controller.signal
     })
   } catch (fetchErr) {
     clearTimeout(timeout)
+    clearTimeout(slowWarn1)
+    clearTimeout(slowWarn2)
+    const elapsed = Date.now() - fetchStartTime
     if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
-      logger.error('aiRecommend', 'request timeout (60s)')
-      throw new Error('AI 请求超时（60 秒未响应），请检查网络或更换模型。')
+      const isUserCancel = externalSignal?.aborted
+      if (isUserCancel) {
+        logger.info('aiRecommend', 'request canceled by user', { elapsedMs: elapsed })
+        throw new Error('__CANCELLED__')
+      }
+      logger.error('aiRecommend', 'request timeout', { elapsedMs: elapsed, timeoutMs: HARD_TIMEOUT_MS })
+      throw new Error(
+        `AI 响应超时（${Math.round(elapsed / 1000)} 秒未返回）。` +
+        '这通常说明模型不兼容或服务端有问题。建议：\n' +
+        '1. 在设置中更换一个模型（如换成 glm-4.6 或 deepseek-chat）\n' +
+        '2. 检查网络连接\n' +
+        '3. 查看日志（设置 → 诊断日志）了解完整请求/响应详情'
+      )
     }
     logger.error('aiRecommend', 'fetch failed', {
-      error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
+      error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
+      elapsedMs: elapsed,
+      url
     })
     throw new Error(`AI 请求失败：${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`)
   }
   clearTimeout(timeout)
+  clearTimeout(slowWarn1)
+  clearTimeout(slowWarn2)
+  const fetchDuration = Date.now() - fetchStartTime
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')
     logger.error('aiRecommend', 'API returned error', {
       status: resp.status,
-      body: text.slice(0, 200)
+      responseBody: text.slice(0, 500),
+      durationMs: fetchDuration
     })
     throw new Error(`AI 请求失败 (${resp.status}): ${text.slice(0, 300)}`)
   }
 
   const json = (await resp.json()) as {
     choices?: { message?: { content?: string } }[]
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
   }
   const content = json.choices?.[0]?.message?.content
+  const usage = json.usage
+
+  // Log the full response for debugging.
+  logger.info('aiRecommend', 'LLM response received', {
+    durationMs: fetchDuration,
+    contentLength: content?.length ?? 0,
+    contentPreview: content?.slice(0, 1000) ?? '(empty)',
+    usage: usage ? {
+      promptTokens: usage.prompt_tokens,
+      completionTokens: usage.completion_tokens,
+      totalTokens: usage.total_tokens
+    } : undefined,
+    finishReason: (json.choices?.[0] as Record<string, unknown>)?.finish_reason
+  })
   if (!content) {
     throw new Error('AI 返回内容为空')
   }
