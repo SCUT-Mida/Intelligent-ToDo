@@ -64,6 +64,11 @@ try {
 
 const repoNav = {
   scan: (): Promise<ScanResult> => ipcRenderer.invoke(IPC.SCAN),
+  onScanProgress: (cb: (p: { current: number; total: number; name: string }) => void): (() => void) => {
+    const handler = (_e: unknown, p: { current: number; total: number; name: string }): void => cb(p)
+    ipcRenderer.on('repoNav:scanProgress', handler)
+    return () => ipcRenderer.removeListener('repoNav:scanProgress', handler as never)
+  },
   loadCachedIndex: (): Promise<RepoIndex | null> => ipcRenderer.invoke(IPC.LOAD_CACHED_INDEX),
   openRepo: (repoPath: string, command: string, mode: 'new-tab' | 'new-window'): Promise<OpenRepoResult> =>
     ipcRenderer.invoke(IPC.OPEN_REPO, repoPath, command, mode),

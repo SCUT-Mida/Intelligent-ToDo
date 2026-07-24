@@ -52,6 +52,7 @@ export default function RepoNavView({
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const [cachedAt, setCachedAt] = useState<string | null>(null)
   const [viewTab, setViewTab] = useState<ViewTab>('all')
+  const [scanProgress, setScanProgress] = useState<{ current: number; total: number; name: string } | null>(null)
 
   // Load config on mount, then load cached index (or scan on first run)
   useEffect(() => {
@@ -73,7 +74,10 @@ export default function RepoNavView({
         }
 
         setLoading(true)
+        setScanProgress({ current: 0, total: 0, name: '正在发现仓库...' })
+        const unsubInit = window.repoNav.onScanProgress((p) => { if (!cancelled) setScanProgress(p) })
         const result = await window.repoNav.scan()
+        unsubInit()
         if (cancelled) return
         setRepos(result.index.repos)
         setCachedAt(result.index.generatedAt)
@@ -155,6 +159,9 @@ export default function RepoNavView({
   const handleRefresh = useCallback(async (): Promise<void> => {
     setLoading(true)
     setError(null)
+    setScanProgress({ current: 0, total: 0, name: '正在发现仓库...' })
+    // Subscribe to progress events during scan
+    const unsub = window.repoNav.onScanProgress((p) => setScanProgress(p))
     try {
       const result = await window.repoNav.scan()
       setRepos(result.index.repos)
@@ -163,6 +170,8 @@ export default function RepoNavView({
     } catch (e) {
       setError('扫描仓库失败: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
+      unsub()
+      setScanProgress(null)
       setLoading(false)
     }
   }, [])
@@ -278,7 +287,19 @@ export default function RepoNavView({
       {loading && (
         <div className="repo-nav-view__loading">
           <div className="spinner" />
-          <div>正在扫描仓库...</div>
+          {scanProgress && scanProgress.total > 0 ? (
+            <>
+              <div>正在扫描仓库... ({scanProgress.current}/{scanProgress.total})</div>
+              <div className="scan-progress-bar">
+                <div className="scan-progress-bar__fill" style={{ width: `${Math.round((scanProgress.current / scanProgress.total) * 100)}%` }} />
+              </div>
+              <div className="scan-progress__name">{scanProgress.name}</div>
+            </>
+          ) : scanProgress ? (
+            <div>{scanProgress.name}</div>
+          ) : (
+            <div>正在扫描仓库...</div>
+          )}
         </div>
       )}
 

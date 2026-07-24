@@ -63,13 +63,20 @@ function getAIConfig(): { apiUrl: string; apiKey: string; model: string } | null
  */
 export function registerRepoNavIpc(ipc: typeof ipcMain): void {
   // ── SCAN: rebuild the repo index ──────────────────────────────────────
-  ipc.handle(IPC.SCAN, async () => {
+  // Async + batched: the scanner yields between batches so the main process
+  // stays responsive (Todo app IPC works during scan). Progress is pushed
+  // to the renderer via webContents.send for the progress bar.
+  ipc.handle(IPC.SCAN, async (event) => {
     const config = getConfig()
-    const index = await scanRepos(config)
-    return {
-      index,
-      durationMs: 0 // duration is calculated inside scanRepos, can refine later
-    }
+    const sender = event.sender
+    const index = await scanRepos(config, (current, total, name) => {
+      try {
+        if (!sender.isDestroyed()) {
+          sender.send('repoNav:scanProgress', { current, total, name })
+        }
+      } catch { /* ignore send errors */ }
+    })
+    return { index, durationMs: 0 }
   })
 
   // ── LOAD_CACHED_INDEX: read persisted index.json without re-scanning ──
