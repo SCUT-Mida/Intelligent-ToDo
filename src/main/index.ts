@@ -181,7 +181,7 @@ async function aiRecommend(
   tasks: Task[],
   config: AppConfig,
   holidayOverrides?: Record<number, YearHolidayData>,
-  opts?: { companyLastSaturday?: boolean },
+  opts?: { companyLastSaturday?: boolean; taskCount?: number },
   externalSignal?: AbortSignal
 ): Promise<AiPriorityResult> {
   if (!config.apiUrl || !config.apiKey || !config.model) {
@@ -250,12 +250,14 @@ async function aiRecommend(
     '你的任务是根据用户的待办事项列表，结合任务进度、截止日期、中国法定节假日与调休补班规则，智能推荐今日应该优先完成的任务。' +
     '你必须严格以 JSON 格式返回结果，不要包含 markdown 代码块标记或多余说明。'
 
+  const taskCount = Math.max(1, Math.min(20, opts?.taskCount ?? 5))
+
   const userPrompt =
     `今天是 ${todayDesc}。\n` +
     '工作日规则：法定节假日和普通周末不计为可工作日；调休补班日（周末调休为工作日）和每月最后一个周六（贵司规则）计为工作日。' +
     '若某任务截止日落在节假日或周末，应建议提前到节前最近的工作日完成；若今天本身是节假日或周末，应在行动建议中提醒，并酌情减少推荐量或建议休息。\n\n' +
     `以下是我的未完成待办任务列表（含进度与截止信息）：\n\n${taskList}\n\n` +
-    '请综合四象限法则、任务进度、截止日期与剩余工作日，推荐我今日应该优先完成的 3-5 个任务，并按优先级从高到低排序。\n' +
+    `请综合四象限法则、任务进度、截止日期与剩余工作日，推荐我今日应该优先完成的 ${taskCount} 个任务，并按优先级从高到低排序。\n` +
     '进度越低的任务通常越需要尽快推进；接近完成（75%+）的任务可优先收尾。\n\n' +
     '**特别重要 — 截止日期优先原则**：\n' +
     '- 四象限中的"紧急/不紧急"是分类参考，不是绝对规则。\n' +

@@ -28,7 +28,7 @@ const api = {
     tasks: Task[],
     config: AppConfig,
     holidayOverrides?: Record<number, YearHolidayData>,
-    opts?: { companyLastSaturday?: boolean }
+    opts?: { companyLastSaturday?: boolean; taskCount?: number }
   ): Promise<AiPriorityResult> =>
     ipcRenderer.invoke('ai:recommend', tasks, config, holidayOverrides, opts),
   cancelAiRecommend: (): Promise<boolean> => ipcRenderer.invoke('ai:cancel'),

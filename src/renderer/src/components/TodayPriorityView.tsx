@@ -14,7 +14,7 @@ interface TodayPriorityViewProps {
   history: DailyPriority[]
   aiState: AiState
   incompleteCount: number
-  onRegenerate: () => void
+  onRegenerate: (taskCount?: number) => void
   /** Cancel an in-flight AI analysis */
   onCancel: () => void
   onTogglePriorityItem: (taskId: string) => void
@@ -60,6 +60,7 @@ export default function TodayPriorityView({
 }: TodayPriorityViewProps): JSX.Element {
   const [tab, setTab] = useState<'today' | 'history'>('today')
   const [expandedDate, setExpandedDate] = useState<string | null>(null)
+  const [taskCount, setTaskCount] = useState(5)
 
   const taskMap = new Map(tasks.map((t) => [t.id, t]))
   const todayHasItems = !!todayPriority && todayPriority.items.length > 0
@@ -100,6 +101,7 @@ export default function TodayPriorityView({
                 totalTasks={tasks.length}
                 taskMap={taskMap}
                 todayHasItems={todayHasItems}
+                taskCount={taskCount}
                 onRegenerate={onRegenerate}
                 onCancel={onCancel}
                 onTogglePriorityItem={onTogglePriorityItem}
@@ -122,9 +124,25 @@ export default function TodayPriorityView({
 
           {tab === 'today' && incompleteCount > 0 && (
             <div className="priority-panel__actions">
+              <div className="task-count-selector">
+                <span>推荐</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={taskCount}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10)
+                    setTaskCount(Number.isNaN(v) ? 5 : Math.max(1, Math.min(20, v)))
+                  }}
+                  disabled={aiState.kind === 'loading'}
+                  className="input task-count-selector__input"
+                />
+                <span>个</span>
+              </div>
               <button
                 className="btn btn--primary"
-                onClick={onRegenerate}
+                onClick={() => onRegenerate(taskCount)}
                 disabled={aiState.kind === 'loading'}
               >
                 {aiState.kind === 'loading'
@@ -159,7 +177,8 @@ interface TodayTabProps {
   totalTasks: number
   taskMap: Map<string, Task>
   todayHasItems: boolean
-  onRegenerate: () => void
+  taskCount: number
+  onRegenerate: (taskCount?: number) => void
   onCancel: () => void
   onTogglePriorityItem: (taskId: string) => void
   onUpdateProgress: (taskId: string, progress: number) => void
@@ -173,6 +192,7 @@ function TodayTab({
   totalTasks,
   taskMap,
   todayHasItems,
+  taskCount,
   onRegenerate,
   onCancel,
   onTogglePriorityItem,
@@ -192,7 +212,7 @@ function TodayTab({
     return (
       <>
         <div className="priority-panel__error">{aiState.message}</div>
-        <button className="btn btn--ghost" onClick={onRegenerate}>
+        <button className="btn btn--ghost" onClick={() => onRegenerate(taskCount)}>
           重试
         </button>
       </>

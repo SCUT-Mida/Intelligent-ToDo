@@ -178,7 +178,7 @@ export default function TodoApp(): JSX.Element {
   }, [state.data, dispatch])
 
   // ---- AI priority ops ----
-  const handleAiRegenerate = useCallback(async (): Promise<void> => {
+  const handleAiRegenerate = useCallback(async (taskCount?: number): Promise<void> => {
     const todayLocal = todayStr()
     const existing = (state.data.priorities ?? []).find((p) => p.date === todayLocal)
     if (existing && existing.items.length > 0) {
@@ -190,7 +190,7 @@ export default function TodoApp(): JSX.Element {
         state.data.tasks,
         state.data.config,
         state.data.holidayOverrides,
-        { companyLastSaturday: state.data.companyLastSaturday ?? true }
+        { companyLastSaturday: state.data.companyLastSaturday ?? true, taskCount }
       )
       const now = new Date().toISOString()
       const newPriority: DailyPriority = {

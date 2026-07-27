@@ -3658,6 +3658,23 @@ select {
 
 /* AI config — empty state */
 
+/* Task count selector (today priority) */
+.task-count-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.task-count-selector__input {
+  width: 48px;
+  text-align: center;
+  padding: 4px 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 /* Scan progress bar */
 .scan-progress-bar {
   width: 200px;
