@@ -181,8 +181,13 @@ export default function TodoApp(): JSX.Element {
   const handleAiRegenerate = useCallback(async (taskCount?: number): Promise<void> => {
     const todayLocal = todayStr()
     const existing = (state.data.priorities ?? []).find((p) => p.date === todayLocal)
-    if (existing && existing.items.length > 0) {
-      if (!window.confirm('今日已有分析结果，重新分析将覆盖当前内容，确认继续？')) return
+    const existingItems = existing?.items ?? []
+
+    // Only ask for confirmation if there are UNCOMPLETED items that will be
+    // replaced by the new analysis. Completed items are always preserved.
+    const hasUncompleted = existingItems.some((item) => !item.completed)
+    if (hasUncompleted) {
+      if (!window.confirm('重新分析将更新推荐列表，已完成的任务会保留。继续？')) return
     }
     setAiState({ kind: 'loading' })
     try {
@@ -193,9 +198,24 @@ export default function TodoApp(): JSX.Element {
         { companyLastSaturday: state.data.companyLastSaturday ?? true, taskCount }
       )
       const now = new Date().toISOString()
-      const newPriority: DailyPriority = {
-        date: todayLocal,
-        items: result.items.map((item) => ({
+
+      // ── Merge strategy ──
+      // 1. Completed items from the existing list are ALWAYS kept (they
+      //    represent today's accomplishments — the user should see them).
+      // 2. New AI recommendations are added.
+      // 3. If a task appears in both (completed before + recommended again),
+      //    preserve its completion state — don't "un-complete" it.
+      // 4. Old uncompleted items NOT in the new list are dropped (the AI
+      //    re-evaluated and didn't recommend them this time).
+
+      const completedFromBefore = existingItems.filter((item) => item.completed)
+
+      // Helper: find existing item by taskId to preserve progress/completed
+      const findOld = (taskId: string) => existingItems.find((old) => old.taskId === taskId)
+
+      const newItems = result.items.map((item) => {
+        const old = findOld(item.taskId)
+        return {
           taskId: item.taskId,
           reason: item.reason
             .replace(/\[ID:\s*[^\]]*\]/gi, '')
@@ -203,12 +223,26 @@ export default function TodoApp(): JSX.Element {
             .replace(/ID[：:]\s*[0-9a-f\-]{8,}/gi, '')
             .replace(/\s{2,}/g, ' ')
             .trim(),
-          progress: 0,
-          completed: false,
-          completedAt: null
-        })),
+          // Preserve progress/completed from old item if it existed
+          progress: old?.progress ?? 0,
+          completed: old?.completed ?? false,
+          completedAt: old?.completedAt ?? null
+        }
+      })
+
+      // Merge: completed items NOT in the new list + new items
+      // (completed items that ARE in the new list are already preserved above)
+      const completedNotInNew = completedFromBefore.filter(
+        (c) => !newItems.some((n) => n.taskId === c.taskId)
+      )
+
+      const mergedItems = [...completedNotInNew, ...newItems]
+
+      const newPriority: DailyPriority = {
+        date: todayLocal,
+        items: mergedItems,
         summary: result.summary,
-        createdAt: now,
+        createdAt: existing?.createdAt ?? now,
         updatedAt: now
       }
       const prev = state.data
