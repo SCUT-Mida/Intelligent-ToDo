@@ -296,6 +296,26 @@ export default function TodoApp(): JSX.Element {
     })
   }, [state.data, dispatch])
 
+  // Remove a task from today's priority list (does NOT complete or delete the task itself)
+  const handleRemovePriorityItem = useCallback((taskId: string): void => {
+    const todayLocal = todayStr()
+    const now = new Date().toISOString()
+    dispatch({
+      type: 'SET_DATA',
+      payload: (() => {
+        const prev = state.data
+        return {
+          ...prev,
+          priorities: (prev.priorities ?? []).map((dp) =>
+            dp.date === todayLocal
+              ? { ...dp, updatedAt: now, items: dp.items.filter((item) => item.taskId !== taskId) }
+              : dp
+          )
+        }
+      })()
+    })
+  }, [state.data, dispatch])
+
   const handleUpdateProgress = useCallback((taskId: string, progress: number): void => {
     const todayLocal = todayStr()
     const now = new Date().toISOString()
@@ -456,6 +476,7 @@ export default function TodoApp(): JSX.Element {
             onRegenerate={handleAiRegenerate}
             onCancel={handleAiCancel}
             onTogglePriorityItem={handleTogglePriorityItem}
+            onRemovePriorityItem={handleRemovePriorityItem}
             onUpdateProgress={handleUpdateProgress}
             onEditTask={(t) => setTaskModal({ task: t, quadrant: t.quadrant })}
           />

@@ -1039,6 +1039,33 @@ select {
   color: var(--primary);
 }
 
+.priority-item__remove {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-faint);
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.priority-item:hover .priority-item__remove {
+  opacity: 1;
+}
+
+.priority-item__remove:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .priority-item__index {
   font-size: 11px;
   color: var(--text-faint);

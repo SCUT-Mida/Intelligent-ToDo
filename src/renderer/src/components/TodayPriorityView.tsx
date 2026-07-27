@@ -15,9 +15,9 @@ interface TodayPriorityViewProps {
   aiState: AiState
   incompleteCount: number
   onRegenerate: (taskCount?: number) => void
-  /** Cancel an in-flight AI analysis */
   onCancel: () => void
   onTogglePriorityItem: (taskId: string) => void
+  onRemovePriorityItem: (taskId: string) => void
   onUpdateProgress: (taskId: string, progress: number) => void
   onEditTask: (task: Task) => void
 }
@@ -55,6 +55,7 @@ export default function TodayPriorityView({
   onRegenerate,
   onCancel,
   onTogglePriorityItem,
+  onRemovePriorityItem,
   onUpdateProgress,
   onEditTask
 }: TodayPriorityViewProps): JSX.Element {
@@ -105,6 +106,7 @@ export default function TodayPriorityView({
                 onRegenerate={onRegenerate}
                 onCancel={onCancel}
                 onTogglePriorityItem={onTogglePriorityItem}
+                onRemovePriorityItem={onRemovePriorityItem}
                 onUpdateProgress={onUpdateProgress}
                 onEditTask={onEditTask}
               />
@@ -181,6 +183,7 @@ interface TodayTabProps {
   onRegenerate: (taskCount?: number) => void
   onCancel: () => void
   onTogglePriorityItem: (taskId: string) => void
+  onRemovePriorityItem: (taskId: string) => void
   onUpdateProgress: (taskId: string, progress: number) => void
   onEditTask: (task: Task) => void
 }
@@ -196,6 +199,7 @@ function TodayTab({
   onRegenerate,
   onCancel,
   onTogglePriorityItem,
+  onRemovePriorityItem,
   onUpdateProgress,
   onEditTask
 }: TodayTabProps): JSX.Element {
@@ -298,6 +302,15 @@ function TodayTab({
                     onClick={() => onEditTask(task)}
                   >
                     ✎
+                  </button>
+                )}
+                {!item.completed && (
+                  <button
+                    className="priority-item__remove"
+                    title="从今日优先中移除（任务本身不受影响）"
+                    onClick={() => onRemovePriorityItem(item.taskId)}
+                  >
+                    ×
                   </button>
                 )}
               </div>
