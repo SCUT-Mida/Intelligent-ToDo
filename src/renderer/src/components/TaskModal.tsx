@@ -16,7 +16,7 @@ function maxDaysInMonth(month: number): number {
 interface TaskModalProps {
   task?: Task | null
   defaultQuadrant?: Quadrant
-  onSave: (data: { content: string; quadrant: Quadrant; dueDate: string | null; progress: number; recurrence?: TaskRecurrence }) => void
+  onSave: (data: { content: string; notes?: string; quadrant: Quadrant; dueDate: string | null; progress: number; recurrence?: TaskRecurrence }) => void
   onClose: () => void
 }
 
@@ -27,6 +27,7 @@ export default function TaskModal({
   onClose
 }: TaskModalProps): JSX.Element {
   const [content, setContent] = useState(task?.content ?? '')
+  const [notes, setNotes] = useState(task?.notes ?? '')
   const [quadrant, setQuadrant] = useState<Quadrant>(task?.quadrant ?? defaultQuadrant)
   const [dueDate, setDueDate] = useState<string>(task?.dueDate ?? '')
   const [progress, setProgress] = useState<number>(task?.progress ?? 0)
@@ -61,6 +62,7 @@ export default function TaskModal({
     if (!trimmed) return
     onSave({
       content: trimmed,
+      notes: notes.trim() || undefined,
       quadrant,
       dueDate: dueDate || null,
       progress,
@@ -86,6 +88,12 @@ export default function TaskModal({
               onChange={(e) => setContent(e.target.value)} autoFocus
               onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleSave() }} />
             <div className="field__hint">Ctrl + Enter 快速保存</div>
+          </div>
+
+          <div className="field">
+            <label className="field__label">备注 <span style={{ fontWeight: 400, color: 'var(--text-faint)' }}>（可选，不会用于 AI 分析）</span></label>
+            <textarea className="textarea textarea--notes" placeholder="备注说明、链接地址等..." value={notes}
+              onChange={(e) => setNotes(e.target.value)} rows={2} />
           </div>
 
           <div className="field">

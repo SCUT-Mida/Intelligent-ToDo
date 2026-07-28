@@ -51,6 +51,8 @@ export function getQuadrantMeta(id: Quadrant): QuadrantMeta {
 export interface Task {
   id: string
   content: string
+  /** Optional notes/remarks shown in the task editor. Not used in AI analysis. */
+  notes?: string
   quadrant: Quadrant
   /** ISO date string (yyyy-mm-dd) or null */
   dueDate: string | null

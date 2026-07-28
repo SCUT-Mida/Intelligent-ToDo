@@ -55,7 +55,7 @@ export default function TodoApp(): JSX.Element {
 
   // ---- task ops ----
   const handleSaveTask = useCallback(
-    (input: { content: string; quadrant: Quadrant; dueDate: string | null; progress: number; recurrence?: TaskRecurrence }): void => {
+    (input: { content: string; notes?: string; quadrant: Quadrant; dueDate: string | null; progress: number; recurrence?: TaskRecurrence }): void => {
       const now = new Date().toISOString()
       const todayLocal = todayStr()
       const effectiveDue = input.recurrence ? computeNextOccurrence(input.recurrence) : input.dueDate
