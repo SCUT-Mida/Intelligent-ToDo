@@ -10,9 +10,9 @@ interface AgentPickerProps {
 }
 
 /**
- * Custom dropdown for selecting an AI agent.
+ * Custom dropdown for selecting an AI agent to launch.
  * Shows detected agents first, undetected agents greyed out with "未安装" hint.
- * Includes a "自定义 Agent…" option for entering a custom command (FIX #5).
+ * Includes a "自定义 Agent…" option for entering a custom command.
  */
 export default function AgentPicker({ agents, value, onChange, onAddCustomAgent }: AgentPickerProps): JSX.Element {
   const [open, setOpen] = useState(false)
@@ -116,7 +116,7 @@ export default function AgentPicker({ agents, value, onChange, onAddCustomAgent 
             )
           })}
 
-          {/* Custom agent input (FIX #5) */}
+          {/* Custom agent input */}
           {onAddCustomAgent && (
             <>
               <div className="agent-picker__divider" />

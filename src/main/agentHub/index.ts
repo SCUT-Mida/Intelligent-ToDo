@@ -1,154 +1,95 @@
 /**
  * Agent Hub IPC handler registration.
  *
- * Registers all agent-hub IPC handlers on the given ipcMain instance.
- * Called once from src/main/index.ts during app.whenReady().
- *
- * Mirrors the registration pattern from ../repoNav/index.ts.
+ * Registers all agent-hub IPC handlers. The key handler is LAUNCH which
+ * opens a system terminal (Windows Terminal / PowerShell) at the given
+ * workDir with the agent command running. Reuses repoNav's launcher.
  */
 
-import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { ipcMain, dialog, BrowserWindow, app } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import { execFileSync } from 'child_process'
+import { readFileSync, existsSync } from 'fs'
+import { join } from 'path'
 import { AGENT_IPC } from '../../shared/agentHub'
-import type { AgentHubData, AgentProbeResult, AgentDescriptor } from '../../shared/agentHub'
+import type { AgentHubData, AgentProbeResult, LaunchPayload, LaunchResult } from '../../shared/agentHub'
 import { detectAgents } from './detect'
 import { loadSessions, saveSessions } from './persistence'
-import { sendMessage, stopSession } from './manager'
+import { openRepoInTerminal } from '../repoNav/launcher'
+import { getConfig as getRepoNavConfig } from '../repoNav/config'
 import { logger } from '../logger'
 
-/**
- * Register all agent-hub IPC handlers.
- *
- * @param ipc - The Electron ipcMain singleton.
- */
 export function registerAgentHubIpc(ipc: typeof ipcMain): void {
-  // ── LIST_AGENTS: detect installed CLI agents ───────────────────────────
-  ipc.handle(AGENT_IPC.LIST_AGENTS, async (): Promise<ReturnType<typeof detectAgents>> => {
-    try {
-      return await detectAgents()
-    } catch (err) {
-      logger.error('agentHub:ipc', 'LIST_AGENTS failed', {
-        error: err instanceof Error ? err.message : String(err)
-      })
-      // Return empty list rather than throwing — the UI shows "no agents found".
+  ipc.handle(AGENT_IPC.LIST_AGENTS, async () => {
+    try { return await detectAgents() } catch (err) {
+      logger.error('agentHub:ipc', 'LIST_AGENTS failed', { error: err instanceof Error ? err.message : String(err) })
       return []
     }
   })
 
-  // ── GET_SESSIONS: load persisted sessions from disk ────────────────────
-  ipc.handle(AGENT_IPC.GET_SESSIONS, (): AgentHubData => {
-    return loadSessions()
-  })
+  ipc.handle(AGENT_IPC.GET_SESSIONS, (): AgentHubData => loadSessions())
 
-  // ── SAVE_SESSIONS: persist all sessions to disk ────────────────────────
-  ipc.handle(AGENT_IPC.SAVE_SESSIONS, (_e: IpcMainInvokeEvent, data: AgentHubData): boolean => {
-    try {
-      saveSessions(data)
-      return true
-    } catch (err) {
-      logger.error('agentHub:ipc', 'SAVE_SESSIONS failed', {
-        error: err instanceof Error ? err.message : String(err)
-      })
+  ipc.handle(AGENT_IPC.SAVE_SESSIONS, (_e, data: AgentHubData): boolean => {
+    try { saveSessions(data); return true } catch (err) {
+      logger.error('agentHub:ipc', 'SAVE_SESSIONS failed', { error: err instanceof Error ? err.message : String(err) })
       return false
     }
   })
 
-  // ── SEND_MESSAGE: spawn agent + stream output ──────────────────────────
-  // The renderer passes the full session object (agentId, workDir, nativeSessionId)
-  // and the text. We spawn the agent, stream chunks back via AGENT_STREAM events,
-  // and return the new assistant message id immediately.
-  ipc.handle(
-    AGENT_IPC.SEND_MESSAGE,
-    (
-      e: IpcMainInvokeEvent,
-      session: { id: string; agentId: string; workDir: string; nativeSessionId?: string },
-      text: string,
-      agentOverride?: AgentDescriptor
-    ) => {
-      try {
-        return sendMessage(e.sender, session, text, agentOverride)
-      } catch (err) {
-        logger.error('agentHub:ipc', 'SEND_MESSAGE failed', {
-          sessionId: session.id,
-          error: err instanceof Error ? err.message : String(err)
-        })
-        throw err
-      }
+  // LAUNCH: open system terminal with agent running.
+  // Reuses repoNav's launcher which handles wt.exe/powershell fallback,
+  // cmd.exe /c start for new windows, and -NoExit to keep terminal open.
+  ipc.handle(AGENT_IPC.LAUNCH, async (_e, payload: LaunchPayload): Promise<LaunchResult> => {
+    logger.info('agentHub:ipc', 'LAUNCH', { command: payload.command, workDir: payload.workDir })
+    try {
+      const config = getRepoNavConfig()
+      return await openRepoInTerminal(payload.workDir, payload.command, 'new-tab', config)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      logger.error('agentHub:ipc', 'LAUNCH failed', { error: msg })
+      return { success: false, method: 'failed', error: msg }
     }
-  )
-
-  // ── STOP_SESSION: kill the running agent process for a session ─────────
-  ipc.handle(AGENT_IPC.STOP_SESSION, (_e: IpcMainInvokeEvent, sessionId: string): boolean => {
-    return stopSession(sessionId)
   })
 
-  // ── PICK_DIRECTORY: show OS folder picker ──────────────────────────────
   ipc.handle(AGENT_IPC.PICK_DIRECTORY, async (): Promise<string | null> => {
     const win = BrowserWindow.getFocusedWindow()
     const result = win
-      ? await dialog.showOpenDialog(win, {
-          title: '选择工作目录',
-          properties: ['openDirectory']
-        })
-      : await dialog.showOpenDialog({
-          title: '选择工作目录',
-          properties: ['openDirectory']
-        })
+      ? await dialog.showOpenDialog(win, { title: '选择工作目录', properties: ['openDirectory'] })
+      : await dialog.showOpenDialog({ title: '选择工作目录', properties: ['openDirectory'] })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
   })
 
-  // ── PROBE_AGENT: verify a custom agent command runs ────────────────────
-  ipc.handle(
-    AGENT_IPC.PROBE_AGENT,
-    async (_e: IpcMainInvokeEvent, command: string): Promise<AgentProbeResult> => {
-      const trimmed = command.trim()
-      if (!trimmed) return { ok: false, output: 'empty command' }
-
-      // Resolve path via where.exe (informational).
-      let resolvedPath: string | undefined
+  ipc.handle(AGENT_IPC.PROBE_AGENT, async (_e, command: string): Promise<AgentProbeResult> => {
+    const trimmed = command.trim()
+    if (!trimmed) return { ok: false, output: 'empty command' }
+    let resolvedPath: string | undefined
+    try {
+      const whereOut = execFileSync('where', [trimmed], { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      resolvedPath = whereOut.split(/\r?\n/)[0]?.trim() || undefined
+    } catch { /* not on PATH */ }
+    try {
+      const stdout = execFileSync(trimmed, ['--version'], { encoding: 'utf-8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      return { ok: true, output: stdout.trim() || undefined, resolvedPath }
+    } catch {
       try {
-        const whereOut = execFileSync('where', [trimmed], {
-          encoding: 'utf-8',
-          timeout: 5000,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true
-        })
-        resolvedPath = whereOut.split(/\r?\n/)[0]?.trim() || undefined
-      } catch {
-        // not on PATH
-      }
-
-      // Try running `<command> --version` (or `--help` as fallback).
-      try {
-        const stdout = execFileSync(trimmed, ['--version'], {
-          encoding: 'utf-8',
-          timeout: 10000,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true
-        })
-        return { ok: true, output: stdout.trim() || undefined, resolvedPath }
-      } catch {
-        // --version failed; try --help
-        try {
-          const stdout = execFileSync(trimmed, ['--help'], {
-            encoding: 'utf-8',
-            timeout: 10000,
-            stdio: ['ignore', 'pipe', 'pipe'],
-            windowsHide: true
-          })
-          return { ok: true, output: stdout.slice(0, 200).trim() || undefined, resolvedPath }
-        } catch (err) {
-          return {
-            ok: false,
-            output: err instanceof Error ? err.message : String(err),
-            resolvedPath
-          }
-        }
-      }
+        const stdout = execFileSync(trimmed, ['--help'], { encoding: 'utf-8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+        return { ok: true, output: stdout.slice(0, 200).trim() || undefined, resolvedPath }
+      } catch (err) { return { ok: false, output: err instanceof Error ? err.message : String(err), resolvedPath } }
     }
-  )
+  })
+
+  // GET_REPO_INDEX: load cached repoNav index for workDir dropdown
+  ipc.handle(AGENT_IPC.GET_REPO_INDEX, () => {
+    try {
+      const indexPath = join(app.getPath('userData'), 'repoNav', 'index.json')
+      if (!existsSync(indexPath)) return null
+      const raw = readFileSync(indexPath, 'utf-8')
+      const parsed = JSON.parse(raw)
+      if (parsed && Array.isArray(parsed.repos)) return parsed
+      return null
+    } catch { return null }
+  })
 
   logger.info('agentHub:ipc', 'IPC handlers registered')
 }

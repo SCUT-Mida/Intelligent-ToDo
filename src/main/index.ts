@@ -7,7 +7,6 @@ import { getDayInfo, describeDay, WEEKDAYS_ZH, remainingWorkdays } from '../shar
 import { createDefaultData } from '../shared/types'
 import { registerRepoNavIpc } from './repoNav'
 import { registerAgentHubIpc } from './agentHub'
-import { stopAllSessions as stopAllAgentSessions } from './agentHub/manager'
 import { scanAiConfigs } from './aiConfigScanner'
 import { AI_IPC } from '../shared/aiConfig'
 import { logger } from './logger'
@@ -936,15 +935,6 @@ app.on('window-all-closed', () => {
   // If isQuitting is false (shouldn't normally happen with our close
   // interception, but just in case), do nothing — the app stays alive
   // in the tray.
-})
-
-app.on('before-quit', () => {
-  // Kill any running agent processes before quitting so we don't orphan them.
-  try {
-    stopAllAgentSessions()
-  } catch {
-    // Non-fatal — agents may already be dead.
-  }
 })
 
 process.on('exit', (code) => {

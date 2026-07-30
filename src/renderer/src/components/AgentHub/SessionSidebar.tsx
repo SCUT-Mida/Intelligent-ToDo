@@ -12,9 +12,9 @@ interface SessionSidebarProps {
 }
 
 /**
- * Session sidebar — shows a list of conversations.
- * New session button at top, sessions in reverse-chronological order.
- * Supports click-to-select, hover-delete, double-click-to-rename.
+ * Session sidebar — shows a list of saved agent launch sessions.
+ * New session button at top, sessions sorted by lastLaunchedAt (recent first),
+ * then by createdAt. Supports click-to-select, hover-delete, double-click-rename.
  */
 export default function SessionSidebar({
   sessions,
@@ -29,9 +29,13 @@ export default function SessionSidebar({
   const [editValue, setEditValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const sorted = [...sessions].sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-  )
+  // Sort: most recent launch first, then by creation date
+  const sorted = [...sessions].sort((a, b) => {
+    const aTime = a.lastLaunchedAt ? new Date(a.lastLaunchedAt).getTime() : 0
+    const bTime = b.lastLaunchedAt ? new Date(b.lastLaunchedAt).getTime() : 0
+    if (aTime !== bTime) return bTime - aTime
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  })
 
   // Focus input when starting edit
   useEffect(() => {
@@ -72,7 +76,14 @@ export default function SessionSidebar({
     return agents.find((a) => a.id === agentId)?.icon ?? '💬'
   }
 
-  function relativeTime(iso: string): string {
+  function getDirBasename(path: string): string {
+    if (!path) return ''
+    const parts = path.replace(/\\/g, '/').split('/')
+    return parts[parts.length - 1] ?? ''
+  }
+
+  function relativeTime(iso: string | null): string {
+    if (!iso) return '从未启动'
     const diff = Date.now() - new Date(iso).getTime()
     const seconds = Math.floor(diff / 1000)
     if (seconds < 60) return '刚刚'
@@ -91,7 +102,7 @@ export default function SessionSidebar({
       <div className="agent-hub__sidebar-header">
         <span className="agent-hub__sidebar-title">会话</span>
         <button className="btn btn--primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={onNew}>
-          ＋ 新建
+          ＋ 新建会话
         </button>
       </div>
       <div className="agent-hub__sidebar-list">
@@ -103,12 +114,7 @@ export default function SessionSidebar({
           sorted.map((session) => {
             const isActive = session.id === activeSessionId
             const isEditing = session.id === editingId
-            const statusIndicator =
-              session.status === 'running'
-                ? '⟳'
-                : session.status === 'error'
-                  ? '✗'
-                  : ''
+            const dirBase = getDirBasename(session.workDir)
 
             return (
               <div
@@ -117,7 +123,7 @@ export default function SessionSidebar({
                 onClick={() => onSelect(session.id)}
               >
                 <span className="agent-hub__sidebar-item-icon">
-                  {statusIndicator || getAgentIcon(session.agentId)}
+                  {getAgentIcon(session.agentId)}
                 </span>
                 <div className="agent-hub__sidebar-item-body">
                   {isEditing ? (
@@ -143,9 +149,21 @@ export default function SessionSidebar({
                     </div>
                   )}
                   <div className="agent-hub__sidebar-item-meta">
-                    <span>{session.messages.length} 条消息</span>
-                    <span>·</span>
-                    <span>{relativeTime(session.updatedAt)}</span>
+                    {dirBase && (
+                      <>
+                        <span>{dirBase}</span>
+                        <span>·</span>
+                      </>
+                    )}
+                    {session.launchCount > 0 && (
+                      <>
+                        <span className="agent-hub__sidebar-item-count">
+                          {session.launchCount} 次
+                        </span>
+                        <span>·</span>
+                      </>
+                    )}
+                    <span>{relativeTime(session.lastLaunchedAt)}</span>
                   </div>
                 </div>
                 <button

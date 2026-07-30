@@ -4,17 +4,12 @@ import { IPC } from '../shared/repoNav'
 import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry, RepoIndex, RepoUserData, ToolProbeResult } from '../shared/repoNav'
 import { AI_IPC } from '../shared/aiConfig'
 import type { AiConfigScanResult } from '../shared/aiConfig'
-import { AGENT_IPC, AGENT_STREAM } from '../shared/agentHub'
+import { AGENT_IPC } from '../shared/agentHub'
 import type {
   AgentDescriptor,
   AgentHubData,
-  AgentSession,
-  SendMessageResult,
-  StreamChunkPayload,
-  StreamToolPayload,
-  StreamStatusPayload,
-  StreamExitPayload,
-  StreamErrorPayload,
+  LaunchPayload,
+  LaunchResult,
   AgentProbeResult
 } from '../shared/agentHub'
 
@@ -120,58 +115,14 @@ const agentHub = {
   getSessions: (): Promise<AgentHubData> => ipcRenderer.invoke(AGENT_IPC.GET_SESSIONS),
   /** Persist all sessions to disk. */
   saveSessions: (data: AgentHubData): Promise<boolean> => ipcRenderer.invoke(AGENT_IPC.SAVE_SESSIONS, data),
-  /**
-   * Send a user message: spawns the agent in print mode with the prompt and
-   * streams stdout back via onStreamChunk. Passes the full session object so
-   * the main process knows which agent to spawn and where. Optionally pass
-   * an agentOverride for custom agents not in the built-in registry.
-   * Returns the new assistant message id (and nativeSessionId if provided).
-   */
-  sendMessage: (
-    session: AgentSession,
-    text: string,
-    agentOverride?: AgentDescriptor
-  ): Promise<SendMessageResult> =>
-    ipcRenderer.invoke(AGENT_IPC.SEND_MESSAGE, session, text, agentOverride),
-  /** Kill the running agent process for a session. */
-  stopSession: (sessionId: string): Promise<boolean> => ipcRenderer.invoke(AGENT_IPC.STOP_SESSION, sessionId),
+  /** Launch an agent in a system terminal window at the given workDir. */
+  launch: (payload: LaunchPayload): Promise<LaunchResult> => ipcRenderer.invoke(AGENT_IPC.LAUNCH, payload),
   /** Show OS folder picker; returns selected path or null. */
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke(AGENT_IPC.PICK_DIRECTORY),
   /** Probe a custom agent command (version check). */
   probeAgent: (command: string): Promise<AgentProbeResult> => ipcRenderer.invoke(AGENT_IPC.PROBE_AGENT, command),
-
-  // ── Streaming event subscriptions (each returns an unsubscribe function) ──
-
-  /** Subscribe to stdout text chunks for a streaming assistant message. */
-  onStreamChunk: (cb: (p: StreamChunkPayload) => void): (() => void) => {
-    const handler = (_e: unknown, p: StreamChunkPayload): void => cb(p)
-    ipcRenderer.on(AGENT_STREAM.CHUNK, handler)
-    return () => ipcRenderer.removeListener(AGENT_STREAM.CHUNK, handler as never)
-  },
-  /** Subscribe to tool-call events parsed from agent output. */
-  onStreamTool: (cb: (p: StreamToolPayload) => void): (() => void) => {
-    const handler = (_e: unknown, p: StreamToolPayload): void => cb(p)
-    ipcRenderer.on(AGENT_STREAM.TOOL, handler)
-    return () => ipcRenderer.removeListener(AGENT_STREAM.TOOL, handler as never)
-  },
-  /** Subscribe to session status changes. */
-  onStreamStatus: (cb: (p: StreamStatusPayload) => void): (() => void) => {
-    const handler = (_e: unknown, p: StreamStatusPayload): void => cb(p)
-    ipcRenderer.on(AGENT_STREAM.STATUS, handler)
-    return () => ipcRenderer.removeListener(AGENT_STREAM.STATUS, handler as never)
-  },
-  /** Subscribe to agent process exit events. */
-  onStreamExit: (cb: (p: StreamExitPayload) => void): (() => void) => {
-    const handler = (_e: unknown, p: StreamExitPayload): void => cb(p)
-    ipcRenderer.on(AGENT_STREAM.EXIT, handler)
-    return () => ipcRenderer.removeListener(AGENT_STREAM.EXIT, handler as never)
-  },
-  /** Subscribe to stderr error chunks. */
-  onStreamError: (cb: (p: StreamErrorPayload) => void): (() => void) => {
-    const handler = (_e: unknown, p: StreamErrorPayload): void => cb(p)
-    ipcRenderer.on(AGENT_STREAM.ERROR, handler)
-    return () => ipcRenderer.removeListener(AGENT_STREAM.ERROR, handler as never)
-  }
+  /** Load cached repo index from repoNav (for workDir dropdown). */
+  getRepoIndex: (): Promise<unknown> => ipcRenderer.invoke(AGENT_IPC.GET_REPO_INDEX)
 }
 
 try {

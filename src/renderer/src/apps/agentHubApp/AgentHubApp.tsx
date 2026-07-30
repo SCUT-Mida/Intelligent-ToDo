@@ -2,28 +2,26 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import SessionSidebar from '../../components/AgentHub/SessionSidebar'
 import AgentPicker from '../../components/AgentHub/AgentPicker'
 import WorkDirPicker from '../../components/AgentHub/WorkDirPicker'
-import ChatView from '../../components/AgentHub/ChatView'
 import type {
   AgentSession,
   AgentDescriptor,
   AgentHubData,
-  ChatMessage,
-  SendMessageResult
+  LaunchResult
 } from '@shared/agentHub'
 import { createDefaultAgentHubData } from '@shared/agentHub'
 import '../../styles/agentHub.css'
 
+interface RepoEntry {
+  name: string
+  path: string
+}
+
 /**
  * Root component for the Agent Hub sub-app.
  *
- * Responsibilities:
- * - Load agents + sessions on mount.
- * - Subscribe to all stream events (chunk, tool, status, exit, error).
- * - Manage sessions, active session, agent selection, logs.
- * - Persist sessions on important changes (exit, new, delete, rename, send).
- *
- * Layout: left sidebar (SessionSidebar) + main area
- *   (toolbar with AgentPicker + WorkDirPicker + log toggle + ChatView).
+ * A session manager + terminal launcher. Users pick an agent + working directory,
+ * click "launch", and a real OS terminal opens with the agent running.
+ * Sessions are saved metadata (agent + workDir pair) for quick relaunch.
  */
 export default function AgentHubApp(): JSX.Element {
   // ── State ──────────────────────────────────────────────────────────────
@@ -32,29 +30,25 @@ export default function AgentHubApp(): JSX.Element {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [agents, setAgents] = useState<AgentDescriptor[]>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string>('claude')
-  const [logs, setLogs] = useState<string[]>([])
-  const [logPanelOpen, setLogPanelOpen] = useState(false)
+  const [repos, setRepos] = useState<RepoEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [launchError, setLaunchError] = useState<string | null>(null)
+  const [launching, setLaunching] = useState(false)
 
-  // Refs to always have access to latest values in stream event callbacks
+  // Refs to always have access to latest values in callbacks
   const selectedAgentIdRef = useRef(selectedAgentId)
   selectedAgentIdRef.current = selectedAgentId
+
+  const sessionsRef = useRef(sessions)
+  sessionsRef.current = sessions
+
+  const agentsRef = useRef(agents)
+  agentsRef.current = agents
 
   const activeSessionIdRef = useRef(activeSessionId)
   activeSessionIdRef.current = activeSessionId
 
-  // Ref for latest sessions — needed in handleSendMessage to avoid stale
-  // closures (the callback has [] deps but needs current session data for
-  // agentId/workDir/nativeSessionId, which change after the first render).
-  const sessionsRef = useRef(sessions)
-  sessionsRef.current = sessions
-
-  // Ref for latest agents — same stale-closure fix for agent override lookup.
-  const agentsRef = useRef(agents)
-  agentsRef.current = agents
-
-  // Counter-based persistence flag: increment when save is needed,
-  // the useEffect below will persist on the next sessions change.
+  // Counter-based persistence flag
   const pendingSaveRef = useRef(0)
 
   // Persist sessions when flagged after a state change
@@ -78,9 +72,10 @@ export default function AgentHubApp(): JSX.Element {
   useEffect(() => {
     void (async () => {
       try {
-        const [agentList, hubData] = await Promise.all([
+        const [agentList, hubData, repoIndex] = await Promise.all([
           window.agentHub.listAgents(),
-          window.agentHub.getSessions()
+          window.agentHub.getSessions(),
+          window.agentHub.getRepoIndex()
         ])
         setAgents(agentList)
         const data = hubData ?? createDefaultAgentHubData()
@@ -88,9 +83,15 @@ export default function AgentHubApp(): JSX.Element {
         if (data.lastAgentId) {
           setSelectedAgentId(data.lastAgentId)
         }
+        // Load repo index
+        const idx = repoIndex as { repos: RepoEntry[] } | null
+        if (idx?.repos) {
+          setRepos(idx.repos)
+        }
         // Auto-select first session if available
         if (data.sessions.length > 0) {
           setActiveSessionId(data.sessions[0].id)
+          setSelectedAgentId(data.sessions[0].agentId)
         }
       } catch (err: unknown) {
         console.error('Failed to load agent hub data', err)
@@ -98,119 +99,6 @@ export default function AgentHubApp(): JSX.Element {
         setLoading(false)
       }
     })()
-  }, [])
-
-  // ── Stream event subscriptions ────────────────────────────────────────
-
-  useEffect(() => {
-    const unsubs: (() => void)[] = []
-
-    // Text chunk: append to the streaming assistant message
-    unsubs.push(
-      window.agentHub.onStreamChunk((p) => {
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === p.sessionId
-              ? {
-                  ...s,
-                  messages: s.messages.map((m) =>
-                    m.id === p.messageId ? { ...m, content: m.content + p.text } : m
-                  )
-                }
-              : s
-          )
-        )
-      })
-    )
-
-    // Tool call: add tool to the assistant message
-    unsubs.push(
-      window.agentHub.onStreamTool((p) => {
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === p.sessionId
-              ? {
-                  ...s,
-                  messages: s.messages.map((m) =>
-                    m.id === p.messageId
-                      ? { ...m, toolCalls: [...(m.toolCalls ?? []), p.tool] }
-                      : m
-                  )
-                }
-              : s
-          )
-        )
-      })
-    )
-
-    // Status change: update session status
-    unsubs.push(
-      window.agentHub.onStreamStatus((p) => {
-        setSessions((prev) =>
-          prev.map((s) => (s.id === p.sessionId ? { ...s, status: p.status } : s))
-        )
-      })
-    )
-
-    // Process exit: mark message as done, set session idle, persist
-    unsubs.push(
-      window.agentHub.onStreamExit((p) => {
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === p.sessionId
-              ? {
-                  ...s,
-                  status: 'idle' as const,
-                  nativeSessionId: p.nativeSessionId ?? s.nativeSessionId,
-                  messages: s.messages.map((m) =>
-                    m.id === p.messageId ? { ...m, streaming: false } : m
-                  )
-                }
-              : s
-          )
-        )
-        pendingSaveRef.current++
-      })
-    )
-
-    // Error on stderr: add to log panel
-    unsubs.push(
-      window.agentHub.onStreamError((p) => {
-        const line = `[stderr] ${p.text}`
-        setLogs((prev) => [...prev, line])
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === p.sessionId
-              ? {
-                  ...s,
-                  messages: s.messages.map((m) =>
-                    m.id === p.messageId ? { ...m, error: p.text } : m
-                  )
-                }
-              : s
-          )
-        )
-      })
-    )
-
-    return () => {
-      for (const fn of unsubs) {
-        fn()
-      }
-    }
-  }, [])
-
-  // FIX #6: Stop all running sessions when this component unmounts (user
-  // switches to another sub-app). Without this, agent processes keep running
-  // in the background, consuming CPU/memory, with their output going nowhere.
-  useEffect(() => {
-    return () => {
-      for (const s of sessionsRef.current) {
-        if (s.status === 'running') {
-          window.agentHub.stopSession(s.id).catch(() => {})
-        }
-      }
-    }
   }, [])
 
   // ── Derived values ────────────────────────────────────────────────────
@@ -221,15 +109,17 @@ export default function AgentHubApp(): JSX.Element {
   // ── Handlers ──────────────────────────────────────────────────────────
 
   const handleNewSession = useCallback((): void => {
+    const agentId = selectedAgentIdRef.current
+    const agent = agentsRef.current.find((a) => a.id === agentId)
     const newSession: AgentSession = {
-      id: `sess-${Date.now()}`,
-      title: '新会话',
-      agentId: selectedAgentIdRef.current,
+      id: `sess-${Date.now().toString(36)}`,
+      title: agent ? `${agent.name} 新会话` : '新会话',
+      agentId,
       workDir: '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      messages: [],
-      status: 'idle'
+      launchCount: 0,
+      lastLaunchedAt: null
     }
     setSessions((prev) => [newSession, ...prev])
     setActiveSessionId(newSession.id)
@@ -237,18 +127,14 @@ export default function AgentHubApp(): JSX.Element {
   }, [])
 
   const handleDeleteSession = useCallback((id: string): void => {
-    // FIX #7: Confirm before deleting sessions with messages (irreversible).
     const session = sessionsRef.current.find((s) => s.id === id)
-    if (session && session.messages.length > 0) {
+    if (session && session.launchCount > 0) {
       const confirmed = window.confirm(
-        `确定要删除「${session.title}」吗？\n此操作无法撤销，会话中的 ${session.messages.length} 条消息将被永久删除。`
+        `确定要删除「${session.title}」吗？\n此会话已启动 ${session.launchCount} 次，删除后无法恢复。`
       )
       if (!confirmed) return
     }
-    setSessions((prev) => {
-      const next = prev.filter((s) => s.id !== id)
-      return next
-    })
+    setSessions((prev) => prev.filter((s) => s.id !== id))
     setActiveSessionId((prev) => (prev === id ? null : prev))
     pendingSaveRef.current++
   }, [])
@@ -262,17 +148,14 @@ export default function AgentHubApp(): JSX.Element {
 
   const handleSelectSession = useCallback((id: string): void => {
     setActiveSessionId(id)
-    const session = sessions.find((s) => s.id === id)
+    const session = sessionsRef.current.find((s) => s.id === id)
     if (session) {
       setSelectedAgentId(session.agentId)
     }
-  }, [sessions])
+  }, [])
 
   const handleAgentChange = useCallback((id: string): void => {
     setSelectedAgentId(id)
-    // FIX #1: Also update the active session's agentId so subsequent messages
-    // use the newly selected agent. Without this, changing the picker had no
-    // effect on the session (send path reads session.agentId, not selectedAgentId).
     const sessionId = activeSessionIdRef.current
     if (sessionId) {
       setSessions((prev) =>
@@ -296,128 +179,54 @@ export default function AgentHubApp(): JSX.Element {
     []
   )
 
-  const handlePickWorkDir = useCallback(async (): Promise<void> => {
+  const handleLaunch = useCallback(async (): Promise<void> => {
+    const session = sessionsRef.current.find((s) => s.id === activeSessionIdRef.current)
+    if (!session) return
+    if (!session.workDir) {
+      setLaunchError('请先选择工作目录')
+      return
+    }
+    const agent = agentsRef.current.find((a) => a.id === session.agentId)
+    if (!agent) {
+      setLaunchError(`未找到 Agent「${session.agentId}」`)
+      return
+    }
+    setLaunchError(null)
+    setLaunching(true)
     try {
-      const result = await window.agentHub.pickDirectory()
-      if (result) {
-        handleWorkDirChange(result)
+      const result: LaunchResult = await window.agentHub.launch({
+        command: agent.command,
+        workDir: session.workDir
+      })
+      if (result.success) {
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === session.id
+              ? {
+                  ...s,
+                  launchCount: s.launchCount + 1,
+                  lastLaunchedAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString()
+                }
+              : s
+          )
+        )
+        pendingSaveRef.current++
+      } else {
+        setLaunchError(result.error ?? '启动失败')
       }
     } catch (err: unknown) {
-      console.error('Failed to pick directory', err)
+      const msg = err instanceof Error ? err.message : String(err)
+      setLaunchError(msg)
+    } finally {
+      setLaunching(false)
     }
-  }, [handleWorkDirChange])
-
-  const handleSendMessage = useCallback(
-    (text: string): void => {
-      const rawSessionId = activeSessionIdRef.current
-      if (!rawSessionId) return
-      const sessionId: string = rawSessionId
-
-      const userMessage: ChatMessage = {
-        id: `msg-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
-        role: 'user',
-        content: text,
-        timestamp: new Date().toISOString()
-      }
-
-      // Optimistically add user message and set status to running
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === sessionId
-            ? {
-                ...s,
-                status: 'running' as const,
-                messages: [...s.messages, userMessage]
-              }
-            : s
-        )
-      )
-
-      // Send to main process (sendMessage expects the full session object).
-      // Use sessionsRef to get the LATEST session data (avoids stale closure —
-      // the callback has [] deps so `sessions` from the closure would be from
-      // the first render, missing nativeSessionId set after the first message).
-      const sessionToSend = sessionsRef.current.find((s) => s.id === sessionId)
-      if (!sessionToSend) return
-
-      // For custom agents (not in built-in registry), pass the full descriptor
-      // so the main process knows how to invoke them.
-      const agentOverride = agentsRef.current.find((a) => a.id === sessionToSend.agentId)
-
-      window.agentHub
-        .sendMessage(sessionToSend, text, agentOverride)
-        .then((result: SendMessageResult) => {
-          const assistantMsg: ChatMessage = {
-            id: result.messageId,
-            role: 'assistant',
-            content: '',
-            timestamp: new Date().toISOString(),
-            streaming: true
-          }
-
-          setSessions((prev) =>
-            prev.map((s) =>
-              s.id === sessionId
-                ? {
-                    ...s,
-                    nativeSessionId: result.nativeSessionId ?? s.nativeSessionId,
-                    messages: [...s.messages, assistantMsg]
-                  }
-                : s
-            )
-          )
-
-          pendingSaveRef.current++
-        })
-        .catch((err: unknown) => {
-          const errMsg = err instanceof Error ? err.message : String(err)
-          const errorSystemMsg: ChatMessage = {
-            id: `err-${Date.now()}`,
-            role: 'system',
-            content: `发送失败: ${errMsg}`,
-            timestamp: new Date().toISOString(),
-            error: errMsg
-          }
-          setSessions((prev) =>
-            prev.map((s) =>
-              s.id === sessionId
-                ? {
-                    ...s,
-                    status: 'error' as const,
-                    messages: [...s.messages, errorSystemMsg]
-                  }
-                : s
-            )
-          )
-          pendingSaveRef.current++
-        })
-    },
-    []
-  )
-
-  const handleStopSession = useCallback((): void => {
-    const sessionId = activeSessionIdRef.current
-    if (!sessionId) return
-    window.agentHub.stopSession(sessionId).catch((err: unknown) => {
-      console.error('Failed to stop session', err)
-    })
   }, [])
 
-  const handleClearLogs = useCallback((): void => {
-    setLogs([])
-  }, [])
-
-  const handleToggleLog = useCallback((): void => {
-    setLogPanelOpen((v) => !v)
-  }, [])
-
-  // FIX #2: Rescan installed agents (referenced by ENOENT error message).
-  const [rescanning, setRescanning] = useState(false)
   const handleRescan = useCallback(async (): Promise<void> => {
-    setRescanning(true)
+    setLaunching(true)
     try {
       const fresh = await window.agentHub.listAgents()
-      // Preserve custom agents (not returned by the built-in scan).
       setAgents((prev) => {
         const customs = prev.filter((a) => a.id.startsWith('custom-'))
         return [...fresh, ...customs]
@@ -425,27 +234,23 @@ export default function AgentHubApp(): JSX.Element {
     } catch (err: unknown) {
       console.error('Failed to rescan agents', err)
     } finally {
-      setRescanning(false)
+      setLaunching(false)
     }
   }, [])
 
-  // FIX #5: Custom agent support — lets users add agents not in the built-in list.
   const handleAddCustomAgent = useCallback(async (command: string): Promise<boolean> => {
     const trimmed = command.trim()
     if (!trimmed) return false
     try {
       const result = await window.agentHub.probeAgent(trimmed)
       if (!result.ok) return false
-      // Create a synthetic descriptor and add it to the agents list.
       const customDescriptor: AgentDescriptor = {
         id: `custom-${trimmed}`,
         name: trimmed,
         icon: '⚡',
         command: trimmed,
-        description: `自定义 Agent (${result.resolvedPath ?? trimmed})`,
+        description: '自定义',
         outputMode: 'generic',
-        printArgs: ['{PROMPT}'],
-        resumeCapable: false,
         detected: true,
         resolvedPath: result.resolvedPath
       }
@@ -455,6 +260,10 @@ export default function AgentHubApp(): JSX.Element {
     } catch {
       return false
     }
+  }, [])
+
+  const dismissError = useCallback((): void => {
+    setLaunchError(null)
   }, [])
 
   // ── Loading state ─────────────────────────────────────────────────────
@@ -478,8 +287,19 @@ export default function AgentHubApp(): JSX.Element {
 
   // ── Render ────────────────────────────────────────────────────────────
 
+  const selectedAgent = agents.find((a) => a.id === selectedAgentId)
+
   return (
     <div className="agent-hub">
+      {launchError && (
+        <div className="agent-hub__error-banner">
+          <span>{launchError}</span>
+          <button className="agent-hub__error-close" onClick={dismissError}>
+            ✕
+          </button>
+        </div>
+      )}
+
       <SessionSidebar
         sessions={sessions}
         agents={agents}
@@ -501,42 +321,100 @@ export default function AgentHubApp(): JSX.Element {
           <button
             className="btn btn--ghost agent-hub__rescan-btn"
             onClick={handleRescan}
-            disabled={rescanning}
+            disabled={launching}
             title="重新扫描已安装的 Agent"
-            style={{ fontSize: 14, padding: '6px 10px' }}
           >
-            {rescanning ? '⟳...' : '⟳'}
+            ⟳
           </button>
           <WorkDirPicker
             value={activeWorkDir}
             onChange={handleWorkDirChange}
             disabled={!activeSessionId}
+            repos={repos}
           />
-          <div className="agent-hub__toolbar-spacer" />
-          <button
-            className={`btn btn--icon ${logPanelOpen ? 'btn--icon--active' : ''}`}
-            onClick={handleToggleLog}
-            title={logPanelOpen ? '隐藏日志' : '显示日志'}
-            style={{
-              fontSize: 16,
-              color: logPanelOpen ? 'var(--primary)' : undefined
-            }}
-          >
-            ⎚
-          </button>
         </div>
 
-        <ChatView
-          session={activeSession}
-          agents={agents}
-          logs={logs}
-          logPanelOpen={logPanelOpen}
-          onToggleLog={handleToggleLog}
-          onClearLogs={handleClearLogs}
-          onSend={handleSendMessage}
-          onStop={handleStopSession}
-          onPickWorkDir={handlePickWorkDir}
-        />
+        <div className="agent-hub__content">
+          {activeSession ? (
+            <div className="agent-hub__detail-card">
+              <div className="agent-hub__detail-header">
+                <span className="agent-hub__detail-icon">
+                  {selectedAgent?.icon ?? '🤖'}
+                </span>
+                <div className="agent-hub__detail-info">
+                  <div className="agent-hub__detail-title">{activeSession.title}</div>
+                  <div className="agent-hub__detail-meta">
+                    <span>{selectedAgent?.name ?? activeSession.agentId}</span>
+                    {activeSession.workDir && (
+                      <>
+                        <span className="agent-hub__detail-sep">·</span>
+                        <span className="agent-hub__detail-dir" title={activeSession.workDir}>
+                          {activeSession.workDir}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="agent-hub__detail-stats">
+                <div className="agent-hub__detail-stat">
+                  <span className="agent-hub__detail-stat-value">{activeSession.launchCount}</span>
+                  <span className="agent-hub__detail-stat-label">启动次数</span>
+                </div>
+                <div className="agent-hub__detail-stat">
+                  <span className="agent-hub__detail-stat-value">
+                    {activeSession.lastLaunchedAt
+                      ? new Date(activeSession.lastLaunchedAt).toLocaleString('zh-CN', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })
+                      : '—'}
+                  </span>
+                  <span className="agent-hub__detail-stat-label">上次启动</span>
+                </div>
+                <div className="agent-hub__detail-stat">
+                  <span className="agent-hub__detail-stat-value">
+                    {new Date(activeSession.createdAt).toLocaleString('zh-CN', {
+                      month: 'short',
+                      day: 'numeric'
+                    })}
+                  </span>
+                  <span className="agent-hub__detail-stat-label">创建时间</span>
+                </div>
+              </div>
+
+              {activeSession.workDir ? (
+                <button
+                  className="agent-hub__launch-btn"
+                  onClick={handleLaunch}
+                  disabled={launching}
+                >
+                  {launching ? '启动中…' : '🚀 在终端中启动'}
+                </button>
+              ) : (
+                <div className="agent-hub__launch-hint">
+                  请在上方工具栏中选择工作目录后启动
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="agent-hub__empty">
+              <div className="agent-hub__empty-icon">🚀</div>
+              <div className="agent-hub__empty-text">
+                选择一个会话或新建一个会话开始使用
+              </div>
+              <div className="agent-hub__empty-hint">
+                Agent Hub 可以帮助你在系统终端中快速启动 AI 编程助手
+              </div>
+              <button className="btn btn--primary" onClick={handleNewSession}>
+                ＋ 新建会话
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
