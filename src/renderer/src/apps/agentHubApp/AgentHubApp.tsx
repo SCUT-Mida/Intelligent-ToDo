@@ -1,13 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useAppContext } from '../../store/AppContext'
 import SessionSidebar from '../../components/AgentHub/SessionSidebar'
-import AgentPicker from '../../components/AgentHub/AgentPicker'
-import WorkDirPicker from '../../components/AgentHub/WorkDirPicker'
+import NewSessionDialog from '../../components/AgentHub/NewSessionDialog'
+import MarkdownEditor from '../../components/AgentHub/MarkdownEditor'
 import TerminalView from '../../components/AgentHub/TerminalView'
-import type {
-  AgentSession,
-  AgentDescriptor,
-  AgentHubData
-} from '@shared/agentHub'
+import type { AgentSession, AgentDescriptor, AgentHubData } from '@shared/agentHub'
 import { createDefaultAgentHubData } from '@shared/agentHub'
 import '../../styles/agentHub.css'
 
@@ -19,11 +16,15 @@ interface RepoEntry {
 /**
  * Root component for the Agent Hub sub-app.
  *
- * A session manager + terminal launcher. Users pick an agent + working directory,
- * click "launch", and a real OS terminal opens with the agent running.
+ * A session manager + terminal launcher. Users create sessions via a dialog
+ * (pick agent + workDir + title), then the embedded xterm.js terminal opens.
  * Sessions are saved metadata (agent + workDir pair) for quick relaunch.
+ *
+ * Supports cross-app jump from RepoNav via pendingAgentHubWorkDir.
  */
 export default function AgentHubApp(): JSX.Element {
+  const { state, clearPendingWorkDir } = useAppContext()
+
   // ── State ──────────────────────────────────────────────────────────────
 
   const [sessions, setSessions] = useState<AgentSession[]>([])
@@ -32,6 +33,11 @@ export default function AgentHubApp(): JSX.Element {
   const [selectedAgentId, setSelectedAgentId] = useState<string>('claude')
   const [repos, setRepos] = useState<RepoEntry[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Dialog state
+  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false)
+  const [pendingWorkDir, setPendingWorkDir] = useState<string | null>(null)
+  const [defaultAgentId, setDefaultAgentId] = useState<string | undefined>(undefined)
 
   // Refs to always have access to latest values in callbacks
   const selectedAgentIdRef = useRef(selectedAgentId)
@@ -42,6 +48,9 @@ export default function AgentHubApp(): JSX.Element {
 
   const agentsRef = useRef(agents)
   agentsRef.current = agents
+
+  const defaultAgentIdRef = useRef(defaultAgentId)
+  defaultAgentIdRef.current = defaultAgentId
 
   const activeSessionIdRef = useRef(activeSessionId)
   activeSessionIdRef.current = activeSessionId
@@ -57,6 +66,7 @@ export default function AgentHubApp(): JSX.Element {
         version: 1,
         sessions,
         lastAgentId: selectedAgentIdRef.current,
+        defaultAgentId: defaultAgentIdRef.current,
         updatedAt: new Date().toISOString()
       }
       window.agentHub.saveSessions(data).catch((err: unknown) => {
@@ -81,6 +91,9 @@ export default function AgentHubApp(): JSX.Element {
         if (data.lastAgentId) {
           setSelectedAgentId(data.lastAgentId)
         }
+        if (data.defaultAgentId) {
+          setDefaultAgentId(data.defaultAgentId)
+        }
         // Load repo index
         const idx = repoIndex as { repos: RepoEntry[] } | null
         if (idx?.repos) {
@@ -99,29 +112,81 @@ export default function AgentHubApp(): JSX.Element {
     })()
   }, [])
 
+  // Check for pendingAgentHubWorkDir (cross-app jump from RepoNav)
+  useEffect(() => {
+    if (loading) return
+    const pending = state.pendingAgentHubWorkDir
+    if (!pending) return
+    clearPendingWorkDir()
+
+    // If a default agent is configured AND detected, skip dialog — create directly.
+    const defId = defaultAgentIdRef.current
+    if (defId) {
+      const agent = agentsRef.current.find((a) => a.id === defId && a.detected)
+      if (agent) {
+        const dirBasename = pending.split(/[\\/]/).pop() || pending
+        const newSession: AgentSession = {
+          id: `sess-${Date.now().toString(36)}`,
+          title: `${agent.name} · ${dirBasename}`,
+          agentId: agent.id,
+          workDir: pending,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          launchCount: 0,
+          lastLaunchedAt: null
+        }
+        setSessions((prev) => [newSession, ...prev])
+        setActiveSessionId(newSession.id)
+        setSelectedAgentId(agent.id)
+        pendingSaveRef.current++
+        return
+      }
+    }
+
+    // No default agent — show dialog with workDir pre-filled
+    setPendingWorkDir(pending)
+    setShowNewSessionDialog(true)
+  }, [loading, state.pendingAgentHubWorkDir, clearPendingWorkDir])
+
   // ── Derived values ────────────────────────────────────────────────────
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
-  const activeWorkDir = activeSession?.workDir ?? ''
 
   // ── Handlers ──────────────────────────────────────────────────────────
 
-  const handleNewSession = useCallback((): void => {
-    const agentId = selectedAgentIdRef.current
-    const agent = agentsRef.current.find((a) => a.id === agentId)
-    const newSession: AgentSession = {
-      id: `sess-${Date.now().toString(36)}`,
-      title: agent ? `${agent.name} 新会话` : '新会话',
-      agentId,
-      workDir: '',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      launchCount: 0,
-      lastLaunchedAt: null
-    }
-    setSessions((prev) => [newSession, ...prev])
-    setActiveSessionId(newSession.id)
-    pendingSaveRef.current++
+  const handleOpenNewSession = useCallback((): void => {
+    setPendingWorkDir(null)
+    setShowNewSessionDialog(true)
+  }, [])
+
+  const handleDialogCreate = useCallback(
+    (agentId: string, workDir: string, title: string, setAsDefault?: boolean): void => {
+      const newSession: AgentSession = {
+        id: `sess-${Date.now().toString(36)}`,
+        title,
+        agentId,
+        workDir,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        launchCount: 0,
+        lastLaunchedAt: null
+      }
+      setSessions((prev) => [newSession, ...prev])
+      setActiveSessionId(newSession.id)
+      setSelectedAgentId(agentId)
+      if (setAsDefault) {
+        setDefaultAgentId(agentId)
+      }
+      setShowNewSessionDialog(false)
+      setPendingWorkDir(null)
+      pendingSaveRef.current++
+    },
+    []
+  )
+
+  const handleDialogClose = useCallback((): void => {
+    setShowNewSessionDialog(false)
+    setPendingWorkDir(null)
   }, [])
 
   const handleDeleteSession = useCallback((id: string): void => {
@@ -151,31 +216,6 @@ export default function AgentHubApp(): JSX.Element {
       setSelectedAgentId(session.agentId)
     }
   }, [])
-
-  const handleAgentChange = useCallback((id: string): void => {
-    setSelectedAgentId(id)
-    const sessionId = activeSessionIdRef.current
-    if (sessionId) {
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === sessionId ? { ...s, agentId: id, updatedAt: new Date().toISOString() } : s
-        )
-      )
-      pendingSaveRef.current++
-    }
-  }, [])
-
-  const handleWorkDirChange = useCallback(
-    (path: string): void => {
-      const id = activeSessionIdRef.current
-      if (!id) return
-      setSessions((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, workDir: path, updatedAt: new Date().toISOString() } : s))
-      )
-      pendingSaveRef.current++
-    },
-    []
-  )
 
   const handleRescan = useCallback(async (): Promise<void> => {
     try {
@@ -243,52 +283,38 @@ export default function AgentHubApp(): JSX.Element {
         agents={agents}
         activeSessionId={activeSessionId}
         onSelect={handleSelectSession}
-        onNew={handleNewSession}
+        onNew={handleOpenNewSession}
         onDelete={handleDeleteSession}
         onRename={handleRenameSession}
       />
 
       <div className="agent-hub__main">
-        <div className="agent-hub__toolbar">
-          <AgentPicker
-            agents={agents}
-            value={selectedAgentId}
-            onChange={handleAgentChange}
-            onAddCustomAgent={handleAddCustomAgent}
-          />
-          <button
-            className="btn btn--ghost agent-hub__rescan-btn"
-            onClick={handleRescan}
-            title="重新扫描已安装的 Agent"
-          >
-            ⟳
-          </button>
-          <WorkDirPicker
-            value={activeWorkDir}
-            onChange={handleWorkDirChange}
-            disabled={!activeSessionId}
-            repos={repos}
-          />
-        </div>
-
         <div className="agent-hub__content">
           {activeSession ? (
             activeSession.workDir ? (
-              <TerminalView
-                key={activeSession.id}
-                sessionId={activeSession.id}
-                command={selectedAgent?.command ?? activeSession.agentId}
-                workDir={activeSession.workDir}
-              />
+              <div className="agent-hub__terminal-wrapper">
+                <MarkdownEditor />
+                <div className="agent-hub__terminal-area">
+                  <TerminalView
+                    key={activeSession.id}
+                    sessionId={activeSession.id}
+                    command={selectedAgent?.command ?? activeSession.agentId}
+                    workDir={activeSession.workDir}
+                  />
+                </div>
+              </div>
             ) : (
               <div className="agent-hub__workdir-prompt">
                 <div className="agent-hub__workdir-prompt-icon">📁</div>
                 <div className="agent-hub__workdir-prompt-text">
-                  请先在上方工具栏选择工作目录
+                  请选择工作目录
                 </div>
                 <div className="agent-hub__workdir-prompt-hint">
-                  选择目录后，终端将在此处启动 {selectedAgent?.name ?? activeSession.agentId}
+                  该会话缺少工作目录，请删除后重新创建
                 </div>
+                <button className="btn btn--primary" onClick={handleOpenNewSession} style={{ marginTop: 8 }}>
+                  ＋ 新建会话
+                </button>
               </div>
             )
           ) : (
@@ -300,13 +326,25 @@ export default function AgentHubApp(): JSX.Element {
               <div className="agent-hub__empty-hint">
                 Agent Hub 在应用内嵌入终端，支持 CLI 助手的全部原生交互
               </div>
-              <button className="btn btn--primary" onClick={handleNewSession}>
+              <button className="btn btn--primary" onClick={handleOpenNewSession}>
                 ＋ 新建会话
               </button>
             </div>
           )}
         </div>
       </div>
+
+      {/* New Session Dialog */}
+      {showNewSessionDialog && (
+        <NewSessionDialog
+          agents={agents}
+          repos={repos}
+          initialWorkDir={pendingWorkDir ?? undefined}
+          onClose={handleDialogClose}
+          onCreate={handleDialogCreate}
+          onAddCustomAgent={handleAddCustomAgent}
+        />
+      )}
     </div>
   )
 }

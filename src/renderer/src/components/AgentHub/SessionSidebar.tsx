@@ -167,6 +167,16 @@ export default function SessionSidebar({
                   </div>
                 </div>
                 <button
+                  className="agent-hub__sidebar-item-rename"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleDoubleClick(session.id, session.title)
+                  }}
+                  title="重命名"
+                >
+                  ✏️
+                </button>
+                <button
                   className="agent-hub__sidebar-item-delete"
                   onClick={(e) => {
                     e.stopPropagation()

@@ -12,6 +12,9 @@ export interface AppState {
   aiConfigured: boolean
   loaded: boolean
   loadError: string | null
+  /** Cross-app navigation: when set, AgentHub reads this on mount to pre-fill
+   *  a new session's workDir. Cleared after consumption. */
+  pendingAgentHubWorkDir: string | null
 }
 
 type Action =
@@ -21,6 +24,7 @@ type Action =
   | { type: 'OPEN_SETTINGS' }
   | { type: 'CLOSE_SETTINGS' }
   | { type: 'SET_LOADED'; payload: { loaded: boolean; error?: string | null } }
+  | { type: 'SET_PENDING_AGENT_HUB_WORKDIR'; payload: string | null }
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -36,6 +40,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, settingsOpen: false }
     case 'SET_LOADED':
       return { ...state, loaded: action.payload.loaded, loadError: action.payload.error ?? null }
+    case 'SET_PENDING_AGENT_HUB_WORKDIR':
+      return { ...state, pendingAgentHubWorkDir: action.payload }
     default:
       return state
   }
@@ -47,7 +53,8 @@ const initialState: AppState = {
   settingsOpen: false,
   aiConfigured: false,
   loaded: false,
-  loadError: null
+  loadError: null,
+  pendingAgentHubWorkDir: null
 }
 
 interface AppContextValue {
@@ -57,6 +64,10 @@ interface AppContextValue {
   setActiveApp: (app: AppId) => void
   openSettings: () => void
   closeSettings: () => void
+  /** Navigate to Agent Hub with a pre-filled workDir (for cross-app jump from RepoNav). */
+  jumpToAgentHub: (workDir: string) => void
+  /** Clear the pending workDir after AgentHub consumed it. */
+  clearPendingWorkDir: () => void
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -111,8 +122,17 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     dispatch({ type: 'CLOSE_SETTINGS' })
   }, [])
 
+  const jumpToAgentHub = useCallback((workDir: string): void => {
+    dispatch({ type: 'SET_PENDING_AGENT_HUB_WORKDIR', payload: workDir })
+    dispatch({ type: 'SET_ACTIVE_APP', payload: 'agentHub' })
+  }, [])
+
+  const clearPendingWorkDir = useCallback((): void => {
+    dispatch({ type: 'SET_PENDING_AGENT_HUB_WORKDIR', payload: null })
+  }, [])
+
   return (
-    <AppContext.Provider value={{ state, dispatch, updateConfig, setActiveApp, openSettings, closeSettings }}>
+    <AppContext.Provider value={{ state, dispatch, updateConfig, setActiveApp, openSettings, closeSettings, jumpToAgentHub, clearPendingWorkDir }}>
       {children}
     </AppContext.Provider>
   )

@@ -140,6 +140,8 @@ export interface AgentHubData {
   version: 1
   sessions: AgentSession[]
   lastAgentId?: string
+  /** Default agent for quick-launch (e.g. from RepoNav jump). Skips the dialog. */
+  defaultAgentId?: string
   updatedAt: string
 }
 

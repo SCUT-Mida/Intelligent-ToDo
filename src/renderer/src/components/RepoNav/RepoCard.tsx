@@ -4,6 +4,8 @@ import type { RepoEntry } from '@shared/repoNav'
 interface RepoCardProps {
   repo: RepoEntry
   onOpen: () => void
+  /** Open this repo in Agent Hub (embedded terminal). */
+  onOpenInAgentHub?: () => void
   /** Optional AI-generated description shown under repo name */
   aiDescription?: string | null
   /** Optional AI-generated tags shown as chips */
@@ -30,6 +32,7 @@ interface RepoCardProps {
 export default function RepoCard({
   repo,
   onOpen,
+  onOpenInAgentHub,
   aiDescription,
   aiTags,
   isFavorite,
@@ -170,6 +173,16 @@ export default function RepoCard({
         >
           打开
         </button>
+        {onOpenInAgentHub && (
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={onOpenInAgentHub}
+            title="在 Agent 对话中打开"
+          >
+            💬 Agent
+          </button>
+        )}
         {!showTagInput && (
           <button
             type="button"

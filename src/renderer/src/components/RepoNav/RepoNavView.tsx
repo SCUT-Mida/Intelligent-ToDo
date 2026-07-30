@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import type { RepoEntry, RepoNavConfig, RepoIndex, RepoUserData } from '@shared/repoNav'
 import RepoCard from './RepoCard'
 import { useScanManager } from '../../lib/scanManager'
+import { useAppContext } from '../../store/AppContext'
 
 type ViewTab = 'all' | 'favorites'
 
@@ -55,6 +56,7 @@ export default function RepoNavView({
   const [viewTab, setViewTab] = useState<ViewTab>('all')
   // Scan state is module-level (survives component unmount/remount)
   const { scanState, startScan } = useScanManager()
+const { jumpToAgentHub } = useAppContext()
   const scanProgress = scanState.progress
   // loading is derived: true during initial cache load OR during scan
   const loading = initialLoad || scanState.isScanning
@@ -344,6 +346,7 @@ export default function RepoNavView({
                 key={repo.path}
                 repo={repo}
                 onOpen={() => handleOpen(repo)}
+                onOpenInAgentHub={() => jumpToAgentHub(repo.path)}
                 aiDescription={memoryMap?.[repo.path]?.description}
                 aiTags={memoryMap?.[repo.path]?.tags}
                 isFavorite={isFavorite}
