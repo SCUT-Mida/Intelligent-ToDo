@@ -10,6 +10,8 @@
  */
 
 import type { WebContents } from 'electron'
+import { join, dirname } from 'path'
+import { existsSync, readFileSync } from 'fs'
 import { PTY_STREAM } from '../../shared/agentHub'
 import { logger } from '../logger'
 
@@ -59,36 +61,116 @@ function safeSend(sender: WebContents, channel: string, ...args: unknown[]): voi
 }
 
 /**
- * Build the shell + args to spawn for a given agent command.
+ * Build the spawn target for a given agent command.
  *
- * We always spawn a system SHELL (cmd.exe on Windows) as the PTY process,
- * then have the shell execute the agent command. This mirrors how repoNav's
- * launcher works and solves three problems:
+ * Strategy (tries each in order, first match wins):
  *
- * 1. PATH resolution: the shell inherits the FULL system PATH (including
- *    npm global, cargo, etc.), while packaged Electron's direct spawn has
- *    a sanitized PATH that can't find user-installed CLI tools.
- * 2. .cmd shim support: npm-installed tools on Windows are .cmd files.
- *    cmd.exe natively understands .cmd; direct spawn doesn't.
- * 3. Survives agent exit: with /K, the shell stays open after the agent
- *    exits, so the user sees output and can type more commands.
+ * 1. **Parse .cmd shim → direct node spawn**: npm-installed CLI tools on
+ *    Windows create .cmd wrapper files. We parse them to extract the actual
+ *    `node script.js` invocation, then spawn node DIRECTLY in the PTY.
+ *    This bypasses cmd.exe entirely, giving TUI apps (opencode, claude, etc.)
+ *    the raw PTY connection they need for keyboard input.
  *
- * Returns { file, args } ready for pty.spawn().
+ * 2. **Direct .exe spawn**: if the command is or resolves to a .exe, spawn
+ *    it directly.
+ *
+ * 3. **cmd.exe /c fallback**: last resort for unknown command types.
  */
-function buildShellCommand(agentCommand: string): { file: string; args: string[] } {
-  if (process.platform === 'win32') {
-    // cmd.exe /K "<command>" — run the agent, then keep cmd open.
-    // /K ensures the terminal stays after the agent exits.
-    return {
-      file: 'cmd.exe',
-      args: ['/k', agentCommand]
+function buildSpawnTarget(command: string): { file: string; args: string[] } {
+  // If already an absolute path to an .exe, use directly.
+  if (/\.(exe)$/i.test(command) && existsSync(command)) {
+    return { file: command, args: [] }
+  }
+
+  // Search common Windows bin dirs for the command.
+  const binDirs = [
+    join(process.env.APPDATA ?? '', 'npm'),
+    join(process.env.USERPROFILE ?? '', '.cargo', 'bin'),
+    join(process.env.USERPROFILE ?? '', '.local', 'bin'),
+    join(process.env.LOCALAPPDATA ?? '', 'Microsoft', 'WindowsApps')
+  ]
+
+  // Try to find and parse a .cmd file (npm shim).
+  for (const dir of binDirs) {
+    if (!dir) continue
+    const cmdPath = join(dir, command + '.cmd')
+    if (existsSync(cmdPath)) {
+      const parsed = parseNpmCmdShim(cmdPath)
+      if (parsed) {
+        logger.info('agentHub:pty', `parsed .cmd shim: ${command} → ${parsed.file} ${parsed.args.join(' ')}`)
+        return parsed
+      }
+    }
+    // Also try .exe
+    const exePath = join(dir, command + '.exe')
+    if (existsSync(exePath)) {
+      return { file: exePath, args: [] }
     }
   }
-  // Unix: use the user's default shell.
-  const shell = process.env.SHELL ?? '/bin/bash'
-  return {
-    file: shell,
-    args: ['-i', '-c', agentCommand]
+
+  // Fallback: cmd.exe /c (has input issues with TUI apps, but better than nothing).
+  logger.warn('agentHub:pty', `could not resolve "${command}", falling back to cmd.exe /c`)
+  if (process.platform === 'win32') {
+    return { file: 'cmd.exe', args: ['/c', command] }
+  }
+  return { file: process.env.SHELL ?? '/bin/bash', args: ['-c', command] }
+}
+
+/**
+ * Parse an npm .cmd shim file to extract the actual executable.
+ *
+ * Handles two common formats:
+ *
+ * 1. Native binary (opencode, codex, etc.):
+ *      "%dp0%\node_modules\opencode-ai\bin\opencode.exe" %*
+ *    → spawn the .exe directly (best case — full TUI support, no intermediary)
+ *
+ * 2. Node script (aider, older tools):
+ *      "%NODE_EXE%"  "%~dp0\node_modules\aider\bin\aider.js" %*
+ *    → spawn node with the script path
+ *
+ * Returns null if parsing fails.
+ */
+function parseNpmCmdShim(cmdPath: string): { file: string; args: string[] } | null {
+  try {
+    const content = readFileSync(cmdPath, 'utf-8')
+    const dir = dirname(cmdPath)
+
+    // Find all quoted paths ending in .exe or .js (these are the actual targets).
+    const matches = [...content.matchAll(/"([^"]+\.(?:exe|js))"/gi)]
+    if (matches.length === 0) return null
+
+    // Resolve %dp0% and %~dp0 to the .cmd file's directory.
+    const resolveVars = (s: string): string =>
+      s.replace(/%dp0%/gi, dir).replace(/%~dp0/gi, dir + '\\')
+
+    // Case 1: if any match is a .exe, use it directly (preferred — no intermediary).
+    const exeMatch = matches.find((m) => m[1].toLowerCase().endsWith('.exe'))
+    if (exeMatch) {
+      const exePath = resolveVars(exeMatch[1])
+      if (existsSync(exePath)) {
+        return { file: exePath, args: [] }
+      }
+    }
+
+    // Case 2: find a .js script and pair it with a node executable.
+    const jsMatch = matches.find((m) => m[1].toLowerCase().endsWith('.js'))
+    if (jsMatch) {
+      const scriptPath = resolveVars(jsMatch[1])
+      if (existsSync(scriptPath)) {
+        // Look for a node.exe reference in the .cmd file.
+        const nodeMatch = content.match(/"([^"]*node[^"]*\.exe)"/i)
+        const nodeExe = nodeMatch ? resolveVars(nodeMatch[1]) : 'node'
+        return { file: nodeExe, args: [scriptPath] }
+      }
+    }
+
+    return null
+  } catch (err) {
+    logger.warn('agentHub:pty', `failed to parse .cmd shim: ${cmdPath}`, {
+      error: err instanceof Error ? err.message : String(err)
+    })
+    return null
   }
 }
 
@@ -115,10 +197,10 @@ export function createPty(
 
   try {
     const pty = getPtyModule()
-    // Spawn via system shell (cmd.exe /k <command>) so the agent inherits
-    // the FULL system PATH — same approach as repoNav's launcher.
-    const { file, args } = buildShellCommand(command)
-    logger.info('agentHub:pty', 'spawning via shell', { sessionId, command, shell: file, args, workDir, cols, rows })
+    // Resolve command: parse .cmd shims to spawn node directly (bypasses
+    // cmd.exe so TUI apps get raw PTY access for keyboard input).
+    const { file, args } = buildSpawnTarget(command)
+    logger.info('agentHub:pty', 'spawning', { sessionId, command, target: file, args, workDir, cols, rows })
 
     const proc = pty.spawn(file, args, {
       name: 'xterm-256color',
