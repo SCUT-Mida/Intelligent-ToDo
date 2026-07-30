@@ -7,6 +7,7 @@ import { getDayInfo, describeDay, WEEKDAYS_ZH, remainingWorkdays } from '../shar
 import { createDefaultData } from '../shared/types'
 import { registerRepoNavIpc } from './repoNav'
 import { registerAgentHubIpc } from './agentHub'
+import { killAllPtys } from './agentHub/pty'
 import { scanAiConfigs } from './aiConfigScanner'
 import { AI_IPC } from '../shared/aiConfig'
 import { logger } from './logger'
@@ -935,6 +936,10 @@ app.on('window-all-closed', () => {
   // If isQuitting is false (shouldn't normally happen with our close
   // interception, but just in case), do nothing — the app stays alive
   // in the tray.
+})
+
+app.on('before-quit', () => {
+  try { killAllPtys() } catch { /* non-fatal */ }
 })
 
 process.on('exit', (code) => {

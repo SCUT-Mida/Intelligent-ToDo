@@ -15,9 +15,13 @@ import { AGENT_IPC } from '../../shared/agentHub'
 import type { AgentHubData, AgentProbeResult, LaunchPayload, LaunchResult } from '../../shared/agentHub'
 import { detectAgents } from './detect'
 import { loadSessions, saveSessions } from './persistence'
+import { createPty, sendInput, resizePty, killPty, killAllPtys } from './pty'
 import { openRepoInTerminal } from '../repoNav/launcher'
 import { getConfig as getRepoNavConfig } from '../repoNav/config'
 import { logger } from '../logger'
+
+// Re-export for main/index.ts cleanup
+export { killAllPtys }
 
 export function registerAgentHubIpc(ipc: typeof ipcMain): void {
   ipc.handle(AGENT_IPC.LIST_AGENTS, async () => {
@@ -89,6 +93,23 @@ export function registerAgentHubIpc(ipc: typeof ipcMain): void {
       if (parsed && Array.isArray(parsed.repos)) return parsed
       return null
     } catch { return null }
+  })
+
+  // ── Embedded PTY handlers ────────────────────────────────────────────────
+  ipc.handle(AGENT_IPC.PTY_CREATE, (e, sessionId: string, command: string, workDir: string, cols: number, rows: number) => {
+    return createPty(e.sender, sessionId, command, workDir, cols, rows)
+  })
+
+  ipc.handle(AGENT_IPC.PTY_INPUT, (_e, sessionId: string, data: string) => {
+    sendInput(sessionId, data)
+  })
+
+  ipc.handle(AGENT_IPC.PTY_RESIZE, (_e, sessionId: string, cols: number, rows: number) => {
+    resizePty(sessionId, cols, rows)
+  })
+
+  ipc.handle(AGENT_IPC.PTY_KILL, (_e, sessionId: string) => {
+    killPty(sessionId)
   })
 
   logger.info('agentHub:ipc', 'IPC handlers registered')

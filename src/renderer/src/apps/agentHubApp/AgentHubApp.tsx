@@ -2,11 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import SessionSidebar from '../../components/AgentHub/SessionSidebar'
 import AgentPicker from '../../components/AgentHub/AgentPicker'
 import WorkDirPicker from '../../components/AgentHub/WorkDirPicker'
+import TerminalView from '../../components/AgentHub/TerminalView'
 import type {
   AgentSession,
   AgentDescriptor,
-  AgentHubData,
-  LaunchResult
+  AgentHubData
 } from '@shared/agentHub'
 import { createDefaultAgentHubData } from '@shared/agentHub'
 import '../../styles/agentHub.css'
@@ -32,8 +32,6 @@ export default function AgentHubApp(): JSX.Element {
   const [selectedAgentId, setSelectedAgentId] = useState<string>('claude')
   const [repos, setRepos] = useState<RepoEntry[]>([])
   const [loading, setLoading] = useState(true)
-  const [launchError, setLaunchError] = useState<string | null>(null)
-  const [launching, setLaunching] = useState(false)
 
   // Refs to always have access to latest values in callbacks
   const selectedAgentIdRef = useRef(selectedAgentId)
@@ -179,52 +177,7 @@ export default function AgentHubApp(): JSX.Element {
     []
   )
 
-  const handleLaunch = useCallback(async (): Promise<void> => {
-    const session = sessionsRef.current.find((s) => s.id === activeSessionIdRef.current)
-    if (!session) return
-    if (!session.workDir) {
-      setLaunchError('请先选择工作目录')
-      return
-    }
-    const agent = agentsRef.current.find((a) => a.id === session.agentId)
-    if (!agent) {
-      setLaunchError(`未找到 Agent「${session.agentId}」`)
-      return
-    }
-    setLaunchError(null)
-    setLaunching(true)
-    try {
-      const result: LaunchResult = await window.agentHub.launch({
-        command: agent.command,
-        workDir: session.workDir
-      })
-      if (result.success) {
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === session.id
-              ? {
-                  ...s,
-                  launchCount: s.launchCount + 1,
-                  lastLaunchedAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString()
-                }
-              : s
-          )
-        )
-        pendingSaveRef.current++
-      } else {
-        setLaunchError(result.error ?? '启动失败')
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setLaunchError(msg)
-    } finally {
-      setLaunching(false)
-    }
-  }, [])
-
   const handleRescan = useCallback(async (): Promise<void> => {
-    setLaunching(true)
     try {
       const fresh = await window.agentHub.listAgents()
       setAgents((prev) => {
@@ -233,8 +186,6 @@ export default function AgentHubApp(): JSX.Element {
       })
     } catch (err: unknown) {
       console.error('Failed to rescan agents', err)
-    } finally {
-      setLaunching(false)
     }
   }, [])
 
@@ -262,10 +213,6 @@ export default function AgentHubApp(): JSX.Element {
     }
   }, [])
 
-  const dismissError = useCallback((): void => {
-    setLaunchError(null)
-  }, [])
-
   // ── Loading state ─────────────────────────────────────────────────────
 
   if (loading) {
@@ -291,15 +238,6 @@ export default function AgentHubApp(): JSX.Element {
 
   return (
     <div className="agent-hub">
-      {launchError && (
-        <div className="agent-hub__error-banner">
-          <span>{launchError}</span>
-          <button className="agent-hub__error-close" onClick={dismissError}>
-            ✕
-          </button>
-        </div>
-      )}
-
       <SessionSidebar
         sessions={sessions}
         agents={agents}
@@ -321,7 +259,6 @@ export default function AgentHubApp(): JSX.Element {
           <button
             className="btn btn--ghost agent-hub__rescan-btn"
             onClick={handleRescan}
-            disabled={launching}
             title="重新扫描已安装的 Agent"
           >
             ⟳
@@ -336,78 +273,32 @@ export default function AgentHubApp(): JSX.Element {
 
         <div className="agent-hub__content">
           {activeSession ? (
-            <div className="agent-hub__detail-card">
-              <div className="agent-hub__detail-header">
-                <span className="agent-hub__detail-icon">
-                  {selectedAgent?.icon ?? '🤖'}
-                </span>
-                <div className="agent-hub__detail-info">
-                  <div className="agent-hub__detail-title">{activeSession.title}</div>
-                  <div className="agent-hub__detail-meta">
-                    <span>{selectedAgent?.name ?? activeSession.agentId}</span>
-                    {activeSession.workDir && (
-                      <>
-                        <span className="agent-hub__detail-sep">·</span>
-                        <span className="agent-hub__detail-dir" title={activeSession.workDir}>
-                          {activeSession.workDir}
-                        </span>
-                      </>
-                    )}
-                  </div>
+            activeSession.workDir ? (
+              <TerminalView
+                key={activeSession.id}
+                sessionId={activeSession.id}
+                command={selectedAgent?.command ?? activeSession.agentId}
+                workDir={activeSession.workDir}
+              />
+            ) : (
+              <div className="agent-hub__workdir-prompt">
+                <div className="agent-hub__workdir-prompt-icon">📁</div>
+                <div className="agent-hub__workdir-prompt-text">
+                  请先在上方工具栏选择工作目录
+                </div>
+                <div className="agent-hub__workdir-prompt-hint">
+                  选择目录后，终端将在此处启动 {selectedAgent?.name ?? activeSession.agentId}
                 </div>
               </div>
-
-              <div className="agent-hub__detail-stats">
-                <div className="agent-hub__detail-stat">
-                  <span className="agent-hub__detail-stat-value">{activeSession.launchCount}</span>
-                  <span className="agent-hub__detail-stat-label">启动次数</span>
-                </div>
-                <div className="agent-hub__detail-stat">
-                  <span className="agent-hub__detail-stat-value">
-                    {activeSession.lastLaunchedAt
-                      ? new Date(activeSession.lastLaunchedAt).toLocaleString('zh-CN', {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })
-                      : '—'}
-                  </span>
-                  <span className="agent-hub__detail-stat-label">上次启动</span>
-                </div>
-                <div className="agent-hub__detail-stat">
-                  <span className="agent-hub__detail-stat-value">
-                    {new Date(activeSession.createdAt).toLocaleString('zh-CN', {
-                      month: 'short',
-                      day: 'numeric'
-                    })}
-                  </span>
-                  <span className="agent-hub__detail-stat-label">创建时间</span>
-                </div>
-              </div>
-
-              {activeSession.workDir ? (
-                <button
-                  className="agent-hub__launch-btn"
-                  onClick={handleLaunch}
-                  disabled={launching}
-                >
-                  {launching ? '启动中…' : '🚀 在终端中启动'}
-                </button>
-              ) : (
-                <div className="agent-hub__launch-hint">
-                  请在上方工具栏中选择工作目录后启动
-                </div>
-              )}
-            </div>
+            )
           ) : (
             <div className="agent-hub__empty">
-              <div className="agent-hub__empty-icon">🚀</div>
+              <div className="agent-hub__empty-icon">💬</div>
               <div className="agent-hub__empty-text">
-                选择一个会话或新建一个会话开始使用
+                选择一个会话或新建一个会话开始对话
               </div>
               <div className="agent-hub__empty-hint">
-                Agent Hub 可以帮助你在系统终端中快速启动 AI 编程助手
+                Agent Hub 在应用内嵌入终端，支持 CLI 助手的全部原生交互
               </div>
               <button className="btn btn--primary" onClick={handleNewSession}>
                 ＋ 新建会话

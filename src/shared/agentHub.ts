@@ -29,14 +29,33 @@ export const AGENT_IPC = {
    * Launch an agent in a system terminal window at the given workDir.
    * Returns the launch result (success/failure + method).
    */
-  LAUNCH: 'agentHub:launch',
-  /** Show OS folder picker; returns selected path or null. */
-  PICK_DIRECTORY: 'agentHub:pickDirectory',
-  /** Probe a custom agent command (--version style). */
-  PROBE_AGENT: 'agentHub:probeAgent',
-  /** Load cached repo index from repoNav (for workDir dropdown). */
-  GET_REPO_INDEX: 'agentHub:getRepoIndex'
-} as const
+   LAUNCH: 'agentHub:launch',
+   /** Show OS folder picker; returns selected path or null. */
+   PICK_DIRECTORY: 'agentHub:pickDirectory',
+   /** Probe a custom agent command (--version style). */
+   PROBE_AGENT: 'agentHub:probeAgent',
+   /** Load cached repo index from repoNav (for workDir dropdown). */
+   GET_REPO_INDEX: 'agentHub:getRepoIndex',
+
+   // ── Embedded PTY (terminal inside the app window) ──
+   /** Create a PTY session. Returns the session id. */
+   PTY_CREATE: 'agentHub:pty:create',
+   /** Write data to a PTY's stdin. */
+   PTY_INPUT: 'agentHub:pty:input',
+   /** Resize a PTY. */
+   PTY_RESIZE: 'agentHub:pty:resize',
+   /** Kill a PTY process. */
+   PTY_KILL: 'agentHub:pty:kill'
+ } as const
+
+ // ── PTY push event channels (main → renderer) ──────────────────────────────
+
+ export const PTY_STREAM = {
+   /** PTY stdout/stderr data arrived. */
+   DATA: 'agentHub:pty:data',
+   /** PTY process exited. */
+   EXIT: 'agentHub:pty:exit'
+ } as const
 
 // ── Agent descriptors ───────────────────────────────────────────────────────
 

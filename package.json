@@ -15,6 +15,7 @@
     "gen:icon": "node scripts/generate-icon.mjs"
   },
   "dependencies": {
+    "@lydell/node-pty": "^1.2.0-beta.14",
     "electron-updater": "^6.8.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -24,6 +25,8 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",

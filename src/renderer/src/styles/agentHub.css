@@ -694,3 +694,55 @@
   color: var(--text-faint);
   font-style: italic;
 }
+
+/* ── Embedded terminal (xterm.js) ──────────────────────────────────────── */
+
+.agent-hub__content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #1e1e2e;
+}
+
+.terminal-view__container {
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.terminal-view__container .xterm {
+  height: 100%;
+}
+
+.terminal-view__container .xterm-viewport {
+  overflow-y: auto !important;
+}
+
+/* ── WorkDir prompt (when session has no workDir) ──────────────────────── */
+
+.agent-hub__workdir-prompt {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--surface);
+}
+
+.agent-hub__workdir-prompt-icon {
+  font-size: 48px;
+}
+
+.agent-hub__workdir-prompt-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.agent-hub__workdir-prompt-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+}

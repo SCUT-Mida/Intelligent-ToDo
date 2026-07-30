@@ -4,7 +4,7 @@ import { IPC } from '../shared/repoNav'
 import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry, RepoIndex, RepoUserData, ToolProbeResult } from '../shared/repoNav'
 import { AI_IPC } from '../shared/aiConfig'
 import type { AiConfigScanResult } from '../shared/aiConfig'
-import { AGENT_IPC } from '../shared/agentHub'
+import { AGENT_IPC, PTY_STREAM } from '../shared/agentHub'
 import type {
   AgentDescriptor,
   AgentHubData,
@@ -122,7 +122,35 @@ const agentHub = {
   /** Probe a custom agent command (version check). */
   probeAgent: (command: string): Promise<AgentProbeResult> => ipcRenderer.invoke(AGENT_IPC.PROBE_AGENT, command),
   /** Load cached repo index from repoNav (for workDir dropdown). */
-  getRepoIndex: (): Promise<unknown> => ipcRenderer.invoke(AGENT_IPC.GET_REPO_INDEX)
+  getRepoIndex: (): Promise<unknown> => ipcRenderer.invoke(AGENT_IPC.GET_REPO_INDEX),
+
+  // ── Embedded PTY (terminal inside the app window) ──
+  /** Create a PTY session for embedded terminal. Returns true on success. */
+  createTerminal: (sessionId: string, command: string, workDir: string, cols: number, rows: number): Promise<boolean> =>
+    ipcRenderer.invoke(AGENT_IPC.PTY_CREATE, sessionId, command, workDir, cols, rows),
+  /** Send keyboard input to a PTY. */
+  sendInput: (sessionId: string, data: string): Promise<void> =>
+    ipcRenderer.invoke(AGENT_IPC.PTY_INPUT, sessionId, data),
+  /** Resize a PTY to match the xterm.js dimensions. */
+  resizeTerminal: (sessionId: string, cols: number, rows: number): Promise<void> =>
+    ipcRenderer.invoke(AGENT_IPC.PTY_RESIZE, sessionId, cols, rows),
+  /** Kill a PTY process. */
+  killTerminal: (sessionId: string): Promise<void> =>
+    ipcRenderer.invoke(AGENT_IPC.PTY_KILL, sessionId),
+
+  // ── PTY event subscriptions (each returns an unsubscribe function) ──
+  /** Subscribe to PTY output data. */
+  onTerminalData: (cb: (sessionId: string, data: string) => void): (() => void) => {
+    const handler = (_e: unknown, sessionId: string, data: string): void => cb(sessionId, data)
+    ipcRenderer.on(PTY_STREAM.DATA, handler)
+    return () => ipcRenderer.removeListener(PTY_STREAM.DATA, handler as never)
+  },
+  /** Subscribe to PTY process exit. */
+  onTerminalExit: (cb: (sessionId: string, exitCode: number) => void): (() => void) => {
+    const handler = (_e: unknown, sessionId: string, exitCode: number): void => cb(sessionId, exitCode)
+    ipcRenderer.on(PTY_STREAM.EXIT, handler)
+    return () => ipcRenderer.removeListener(PTY_STREAM.EXIT, handler as never)
+  }
 }
 
 try {

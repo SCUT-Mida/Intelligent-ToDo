@@ -30,6 +30,11 @@ files:
 # 生成 asar 归档（默认开启），保护源码并减少文件碎片
 asar: true
 
+# 原生模块（@lydell/node-pty 的 ConPTY 二进制）必须解包到 asar 外才能被 require 加载
+asarUnpack:
+  - "**/*.node"
+  - "**/prebuilds/**/*"
+
 # Windows 目标
 win:
   target:
