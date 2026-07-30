@@ -10,8 +10,6 @@
  */
 
 import type { WebContents } from 'electron'
-import { join } from 'path'
-import { existsSync } from 'fs'
 import { PTY_STREAM } from '../../shared/agentHub'
 import { logger } from '../logger'
 
@@ -61,58 +59,37 @@ function safeSend(sender: WebContents, channel: string, ...args: unknown[]): voi
 }
 
 /**
- * User-level bin directories where CLI agents are installed. Used to:
- * 1. Augment PATH for the PTY process (packaged Electron has sanitized PATH)
- * 2. Resolve bare command names to absolute paths
+ * Build the shell + args to spawn for a given agent command.
+ *
+ * We always spawn a system SHELL (cmd.exe on Windows) as the PTY process,
+ * then have the shell execute the agent command. This mirrors how repoNav's
+ * launcher works and solves three problems:
+ *
+ * 1. PATH resolution: the shell inherits the FULL system PATH (including
+ *    npm global, cargo, etc.), while packaged Electron's direct spawn has
+ *    a sanitized PATH that can't find user-installed CLI tools.
+ * 2. .cmd shim support: npm-installed tools on Windows are .cmd files.
+ *    cmd.exe natively understands .cmd; direct spawn doesn't.
+ * 3. Survives agent exit: with /K, the shell stays open after the agent
+ *    exits, so the user sees output and can type more commands.
+ *
+ * Returns { file, args } ready for pty.spawn().
  */
-const USER_BIN_DIRS: string[] = [
-  join(process.env.APPDATA ?? '', 'npm'),
-  join(process.env.USERPROFILE ?? '', '.cargo', 'bin'),
-  join(process.env.USERPROFILE ?? '', '.local', 'bin'),
-  join(process.env.LOCALAPPDATA ?? '', 'Microsoft', 'WindowsApps')
-]
-
-/** Executable extensions to probe on Windows. */
-const EXE_EXTENSIONS = ['.cmd', '.exe', '.bat', '.ps1']
-
-/**
- * Resolve a bare command name to an absolute path by searching user-level bin
- * directories. Returns the original command if not found (lets the OS PATH
- * have a try, or produces a clear error).
- */
-function resolveCommand(command: string): string {
-  // If it's already an absolute path, use it directly.
-  if (/^[A-Za-z]:[\\/]/.test(command) || command.includes('/') || command.includes('\\')) {
-    return command
-  }
-
-  // Search user-level bin dirs.
-  for (const dir of USER_BIN_DIRS) {
-    if (!dir) continue
-    for (const ext of EXE_EXTENSIONS) {
-      const candidate = join(dir, command + ext)
-      if (existsSync(candidate)) {
-        logger.info('agentHub:pty', `resolved command "${command}" → ${candidate}`)
-        return candidate
-      }
+function buildShellCommand(agentCommand: string): { file: string; args: string[] } {
+  if (process.platform === 'win32') {
+    // cmd.exe /K "<command>" — run the agent, then keep cmd open.
+    // /K ensures the terminal stays after the agent exits.
+    return {
+      file: 'cmd.exe',
+      args: ['/k', agentCommand]
     }
   }
-
-  // Not found in user dirs — return as-is and hope the OS PATH has it.
-  return command
-}
-
-/**
- * Build an augmented PATH that includes user-level bin directories.
- * Packaged Electron apps inherit a sanitized PATH from the OS launcher,
- * which often excludes npm global, cargo, .local/bin, etc. Without this,
- * agents installed via `npm install -g` are invisible to spawned PTYs.
- */
-function buildAugmentedPath(): string {
-  const currentPath = process.env.PATH ?? ''
-  const extra = USER_BIN_DIRS.filter((d) => d && existsSync(d))
-  if (extra.length === 0) return currentPath
-  return `${extra.join(';')};${currentPath}`
+  // Unix: use the user's default shell.
+  const shell = process.env.SHELL ?? '/bin/bash'
+  return {
+    file: shell,
+    args: ['-i', '-c', agentCommand]
+  }
 }
 
 /**
@@ -138,21 +115,18 @@ export function createPty(
 
   try {
     const pty = getPtyModule()
-    // Resolve bare command names (e.g. "claude") to absolute paths by searching
-    // user-level bin dirs. This is CRITICAL for packaged Electron where PATH
-    // is sanitized — without it, spawn fails with exit code 2 (not found).
-    const resolvedCommand = resolveCommand(command)
-    const augmentedPath = buildAugmentedPath()
-    logger.info('agentHub:pty', 'spawning', { sessionId, command, resolvedCommand, workDir, cols, rows })
+    // Spawn via system shell (cmd.exe /k <command>) so the agent inherits
+    // the FULL system PATH — same approach as repoNav's launcher.
+    const { file, args } = buildShellCommand(command)
+    logger.info('agentHub:pty', 'spawning via shell', { sessionId, command, shell: file, args, workDir, cols, rows })
 
-    const proc = pty.spawn(resolvedCommand, [], {
+    const proc = pty.spawn(file, args, {
       name: 'xterm-256color',
       cols,
       rows,
       cwd: workDir || undefined,
       env: {
         ...process.env,
-        PATH: augmentedPath,
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
         FORCE_COLOR: '1'
