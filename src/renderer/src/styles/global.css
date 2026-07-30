@@ -2631,6 +2631,21 @@ select {
   font-size: 14px;
 }
 
+/* All apps are always mounted (layer stack) — only active one is visible.
+   This keeps AgentHubApp PTY processes alive across app switches. */
+.app-shell__app-stack {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+.app-shell__app-layer {
+  position: absolute;
+  inset: 0;
+  flex-direction: column;
+  min-height: 0;
+}
+
 /* ── Activity Bar (left rail) ── */
 
 .activity-bar {
