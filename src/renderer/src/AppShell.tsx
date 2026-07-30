@@ -19,26 +19,36 @@ function LoadingFallback(): JSX.Element {
 
 export default function AppShell(): JSX.Element {
   const { state } = useAppContext()
-
-  const renderActiveApp = (): JSX.Element => {
-    switch (state.activeApp) {
-      case 'todo':
-        return <TodoApp />
-      case 'repoNav':
-        return <RepoNavApp />
-      case 'agentHub':
-        return <AgentHubApp />
-      default:
-        return <TodoApp />
-    }
-  }
+  const isAgentHub = state.activeApp === 'agentHub'
 
   return (
     <div className="app-shell">
       <ActivityBar />
       <main className="app-shell__content">
+        {/* Non-agentHub apps — unmount when navigating away (normal behavior) */}
         <Suspense fallback={<LoadingFallback />}>
-          {renderActiveApp()}
+          {!isAgentHub && (
+            state.activeApp === 'todo' ? <TodoApp /> :
+            state.activeApp === 'repoNav' ? <RepoNavApp /> :
+            <TodoApp />
+          )}
+        </Suspense>
+
+        {/* AgentHubApp is ALWAYS mounted — keeps PTY processes alive across
+            app switches and window minimize. display:none when not active,
+            so it takes no layout space. */}
+        <Suspense fallback={null}>
+          <div
+            className="app-shell__agenthub"
+            style={{
+              display: isAgentHub ? 'flex' : 'none',
+              flex: 1,
+              minHeight: 0,
+              overflow: 'hidden'
+            }}
+          >
+            <AgentHubApp />
+          </div>
         </Suspense>
       </main>
       {state.settingsOpen && <UnifiedSettingsModal />}
