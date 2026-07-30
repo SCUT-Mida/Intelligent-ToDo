@@ -290,34 +290,7 @@ export default function AgentHubApp(): JSX.Element {
 
       <div className="agent-hub__main">
         <div className="agent-hub__content">
-          {activeSession ? (
-            activeSession.workDir ? (
-              <div className="agent-hub__terminal-wrapper">
-                <MarkdownEditor />
-                <div className="agent-hub__terminal-area">
-                  <TerminalView
-                    key={activeSession.id}
-                    sessionId={activeSession.id}
-                    command={selectedAgent?.command ?? activeSession.agentId}
-                    workDir={activeSession.workDir}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="agent-hub__workdir-prompt">
-                <div className="agent-hub__workdir-prompt-icon">📁</div>
-                <div className="agent-hub__workdir-prompt-text">
-                  请选择工作目录
-                </div>
-                <div className="agent-hub__workdir-prompt-hint">
-                  该会话缺少工作目录，请删除后重新创建
-                </div>
-                <button className="btn btn--primary" onClick={handleOpenNewSession} style={{ marginTop: 8 }}>
-                  ＋ 新建会话
-                </button>
-              </div>
-            )
-          ) : (
+          {sessions.length === 0 ? (
             <div className="agent-hub__empty">
               <div className="agent-hub__empty-icon">💬</div>
               <div className="agent-hub__empty-text">
@@ -329,6 +302,46 @@ export default function AgentHubApp(): JSX.Element {
               <button className="btn btn--primary" onClick={handleOpenNewSession}>
                 ＋ 新建会话
               </button>
+            </div>
+          ) : (
+            <div className="agent-hub__terminal-wrapper">
+              <MarkdownEditor />
+              <div className="agent-hub__terminal-stack">
+                {sessions.map((s) => {
+                  const isActive = s.id === activeSessionId
+                  const agent = agents.find((a) => a.id === s.agentId)
+                  return (
+                    <div
+                      key={s.id}
+                      className="agent-hub__terminal-panel"
+                      style={{ display: isActive ? 'flex' : 'none' }}
+                    >
+                      {s.workDir ? (
+                        <div className="agent-hub__terminal-area">
+                          <TerminalView
+                            sessionId={s.id}
+                            command={agent?.command ?? s.agentId}
+                            workDir={s.workDir}
+                          />
+                        </div>
+                      ) : (
+                        <div className="agent-hub__workdir-prompt">
+                          <div className="agent-hub__workdir-prompt-icon">📁</div>
+                          <div className="agent-hub__workdir-prompt-text">
+                            请选择工作目录
+                          </div>
+                          <div className="agent-hub__workdir-prompt-hint">
+                            该会话缺少工作目录，请删除后重新创建
+                          </div>
+                          <button className="btn btn--primary" onClick={handleOpenNewSession} style={{ marginTop: 8 }}>
+                            ＋ 新建会话
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
         </div>

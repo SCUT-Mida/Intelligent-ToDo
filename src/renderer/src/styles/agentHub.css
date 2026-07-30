@@ -923,6 +923,22 @@
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+  background: #1e1e2e;
+}
+
+/* Stacking container — holds one terminal-panel per session, only active one visible */
+.agent-hub__terminal-stack {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+/* Each session's terminal panel — absolutely positioned to fill the stack, hidden when inactive */
+.agent-hub__terminal-panel {
+  position: absolute;
+  inset: 0;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .agent-hub__terminal-area {
@@ -932,7 +948,6 @@
   min-height: 0;
   overflow: hidden;
   position: relative;
-  background: #1e1e2e;
 }
 
 /* ── Embedded terminal (xterm.js) ──────────────────────────────────────── */
