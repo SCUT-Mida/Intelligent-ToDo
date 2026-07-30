@@ -6,6 +6,7 @@ import UnifiedSettingsModal from './settings/UnifiedSettingsModal'
 // Lazy-load apps for smaller initial bundle
 const TodoApp = lazy(() => import('./apps/todoApp/TodoApp'))
 const RepoNavApp = lazy(() => import('./apps/repoNavApp/RepoNavApp'))
+const AgentHubApp = lazy(() => import('./apps/agentHubApp/AgentHubApp'))
 
 function LoadingFallback(): JSX.Element {
   return (
@@ -25,6 +26,8 @@ export default function AppShell(): JSX.Element {
         return <TodoApp />
       case 'repoNav':
         return <RepoNavApp />
+      case 'agentHub':
+        return <AgentHubApp />
       default:
         return <TodoApp />
     }
