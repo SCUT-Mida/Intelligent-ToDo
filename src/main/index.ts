@@ -6,6 +6,8 @@ import type { AppData, Task, AppConfig, LoadResult, AiPriorityResult, YearHolida
 import { getDayInfo, describeDay, WEEKDAYS_ZH, remainingWorkdays } from '../shared/workday'
 import { createDefaultData } from '../shared/types'
 import { registerRepoNavIpc } from './repoNav'
+import { registerAgentHubIpc } from './agentHub'
+import { stopAllSessions as stopAllAgentSessions } from './agentHub/manager'
 import { scanAiConfigs } from './aiConfigScanner'
 import { AI_IPC } from '../shared/aiConfig'
 import { logger } from './logger'
@@ -753,6 +755,9 @@ app.whenReady().then(() => {
   // doesn't matter for IPC, but grouping them together reads well).
   registerRepoNavIpc(ipcMain)
 
+  // Register agent-hub IPC handlers (CLI agent chat integration).
+  registerAgentHubIpc(ipcMain)
+
   // Scan external AI tool configs (opencode.json) so the renderer can offer
   // a "import from existing config" option in settings.
   ipcMain.handle(AI_IPC.SCAN_CONFIGS, () => scanAiConfigs())
@@ -931,6 +936,15 @@ app.on('window-all-closed', () => {
   // If isQuitting is false (shouldn't normally happen with our close
   // interception, but just in case), do nothing — the app stays alive
   // in the tray.
+})
+
+app.on('before-quit', () => {
+  // Kill any running agent processes before quitting so we don't orphan them.
+  try {
+    stopAllAgentSessions()
+  } catch {
+    // Non-fatal — agents may already be dead.
+  }
 })
 
 process.on('exit', (code) => {
