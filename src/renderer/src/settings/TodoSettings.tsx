@@ -63,7 +63,7 @@ export default function TodoSettings({ data }: TodoSettingsProps): JSX.Element {
   return (
     <div className="todo-settings">
       {/* 工作日与节假日 */}
-      <Section title="工作日与节假日" icon="📅" label="日历">
+      <Section title="工作日与节假日" icon="📅" label="日历" defaultOpen={false}>
         <div className="field">
           <label className="field__row" style={{ cursor: 'pointer' }}>
             <input

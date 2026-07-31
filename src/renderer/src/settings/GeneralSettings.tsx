@@ -260,8 +260,57 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
 
   return (
     <div className="general-settings">
+      {/* 应用更新 */}
+      <Section title="应用更新" icon="🔄" label="应用" defaultOpen={false}>
+        <div className="field">
+          <div className="field__row">
+            <div className="field__row-text">当前版本 <b>v{appStatus?.version ?? '…'}</b></div>
+            <button type="button" className="btn btn--ghost" style={{ flexShrink: 0 }}
+              onClick={handleCheckUpdate}
+              disabled={updateState.stage === 'checking' || updateState.stage === 'downloading' || updateState.stage === 'downloaded'}>
+              {updateState.stage === 'checking' ? '检查中…' : '检查更新'}
+            </button>
+          </div>
+
+          {updateState.stage === 'available' && (
+            <div className="update-notice">
+              <div className="update-notice__head">发现新版本 <b>v{updateState.version}</b></div>
+              {updateState.notes && <div className="update-notice__notes">{updateState.notes}</div>}
+              <button type="button" className="btn btn--primary" onClick={handleDownload} style={{ marginTop: 8 }}>
+                下载并安装
+              </button>
+            </div>
+          )}
+
+          {updateState.stage === 'downloading' && (
+            <div className="update-progress">
+              <div className="update-progress__bar">
+                <div className="update-progress__fill" style={{ width: `${updateState.percent}%` }} />
+              </div>
+              <div className="field__hint">正在下载更新… {updateState.percent}%</div>
+            </div>
+          )}
+
+          {updateState.stage === 'downloaded' && (
+            <div className="field__row update-action" style={{ marginTop: 8 }}>
+              <div className="field__hint field__hint--success">更新已下载完成，点击安装将退出应用并自动替换为新版本。</div>
+              <button type="button" className="btn btn--primary" onClick={handleInstall}>退出并安装</button>
+            </div>
+          )}
+
+          {updateState.stage === 'latest' && <div className="field__hint field__hint--success">✓ 已是最新版本</div>}
+          {updateState.stage === 'error' && <div className="field__hint field__hint--error">{updateState.message}</div>}
+
+          <div className="field__hint">
+            {appStatus?.isPackaged
+              ? '仅「安装版」支持自动更新。下载完成后点击安装将自动替换并重启。'
+              : '当前为开发/未打包模式，自动更新不可用。'}
+          </div>
+        </div>
+      </Section>
+
       {/* AI 模型 */}
-      <Section title="AI 模型" icon="🤖" label="AI 配置">
+      <Section title="AI 模型" icon="🤖" label="AI 配置" defaultOpen={false}>
         {/* Current effective config — compact, informative */}
         {activeProviderInfo && (
           <div className="ai-current-summary">
@@ -473,55 +522,6 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
           </div>
         </div>
       )}
-
-      {/* 应用更新 */}
-      <Section title="应用更新" icon="🔄" label="应用" defaultOpen={false}>
-        <div className="field">
-          <div className="field__row">
-            <div className="field__row-text">当前版本 <b>v{appStatus?.version ?? '…'}</b></div>
-            <button type="button" className="btn btn--ghost" style={{ flexShrink: 0 }}
-              onClick={handleCheckUpdate}
-              disabled={updateState.stage === 'checking' || updateState.stage === 'downloading' || updateState.stage === 'downloaded'}>
-              {updateState.stage === 'checking' ? '检查中…' : '检查更新'}
-            </button>
-          </div>
-
-          {updateState.stage === 'available' && (
-            <div className="update-notice">
-              <div className="update-notice__head">发现新版本 <b>v{updateState.version}</b></div>
-              {updateState.notes && <div className="update-notice__notes">{updateState.notes}</div>}
-              <button type="button" className="btn btn--primary" onClick={handleDownload} style={{ marginTop: 8 }}>
-                下载并安装
-              </button>
-            </div>
-          )}
-
-          {updateState.stage === 'downloading' && (
-            <div className="update-progress">
-              <div className="update-progress__bar">
-                <div className="update-progress__fill" style={{ width: `${updateState.percent}%` }} />
-              </div>
-              <div className="field__hint">正在下载更新… {updateState.percent}%</div>
-            </div>
-          )}
-
-          {updateState.stage === 'downloaded' && (
-            <div className="field__row update-action" style={{ marginTop: 8 }}>
-              <div className="field__hint field__hint--success">更新已下载完成，点击安装将退出应用并自动替换为新版本。</div>
-              <button type="button" className="btn btn--primary" onClick={handleInstall}>退出并安装</button>
-            </div>
-          )}
-
-          {updateState.stage === 'latest' && <div className="field__hint field__hint--success">✓ 已是最新版本</div>}
-          {updateState.stage === 'error' && <div className="field__hint field__hint--error">{updateState.message}</div>}
-
-          <div className="field__hint">
-            {appStatus?.isPackaged
-              ? '仅「安装版」支持自动更新。下载完成后点击安装将自动替换并重启。'
-              : '当前为开发/未打包模式，自动更新不可用。'}
-          </div>
-        </div>
-      </Section>
 
       {/* 诊断 / 日志 */}
       <Section title="诊断日志" icon="📋" label="诊断" defaultOpen={false}>

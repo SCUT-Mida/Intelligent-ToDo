@@ -421,7 +421,7 @@ export default function RepoNavSettings(): JSX.Element {
     <div className="repo-nav-settings">
 
       {/* ─── 扫描配置 ─── */}
-      <Section title="扫描配置" icon="🔍" label="扫描">
+      <Section title="扫描配置" icon="🔍" label="扫描" defaultOpen={false}>
         {/* 扫描根目录 */}
         <div className="field">
           <label className="field__label">扫描根目录</label>
