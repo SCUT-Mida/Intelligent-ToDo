@@ -1179,14 +1179,37 @@
   background: rgba(220, 38, 38, 0.08);
 }
 
-/* Row 4 — Footer: copy + send buttons, right-aligned */
+/* Row 4 — Footer: preview toggle (left) + copy & send buttons (right) */
 .markdown-editor__footer {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
   padding: 6px 8px;
   flex-shrink: 0;
+}
+
+.markdown-editor__preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.markdown-editor__preview-btn:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
 }
 
 .markdown-editor__textarea {
@@ -1215,6 +1238,150 @@
   flex: 1;
   display: flex;
   min-height: 0;
+}
+
+/* ── Body: editor textarea (top) + optional rendered preview (bottom) ──────── */
+
+.markdown-editor__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Row 3 bottom half — rendered Markdown preview */
+.markdown-editor__preview {
+  flex: 1;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 12px 14px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.markdown-editor__preview--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.markdown-editor__preview-empty {
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.markdown-editor__preview > :first-child {
+  margin-top: 0;
+}
+
+.markdown-editor__preview > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-editor__preview h1,
+.markdown-editor__preview h2,
+.markdown-editor__preview h3,
+.markdown-editor__preview h4 {
+  margin: 1.2em 0 0.5em;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.markdown-editor__preview h1 {
+  font-size: 20px;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown-editor__preview h2 {
+  font-size: 17px;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown-editor__preview h3 {
+  font-size: 15px;
+}
+
+.markdown-editor__preview h4 {
+  font-size: 14px;
+}
+
+.markdown-editor__preview p {
+  margin: 0.5em 0;
+}
+
+.markdown-editor__preview ul,
+.markdown-editor__preview ol {
+  margin: 0.5em 0;
+  padding-left: 1.6em;
+}
+
+.markdown-editor__preview li {
+  margin: 0.2em 0;
+}
+
+.markdown-editor__preview blockquote {
+  margin: 0.6em 0;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--primary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+  color: var(--text-muted);
+}
+
+.markdown-editor__preview blockquote p {
+  margin: 0.3em 0;
+}
+
+.markdown-editor__preview pre {
+  margin: 0.6em 0;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--text) 6%, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Consolas, 'Courier New', monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.markdown-editor__preview code {
+  font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Consolas, 'Courier New', monospace;
+  font-size: 0.92em;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+}
+
+.markdown-editor__preview pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+.markdown-editor__preview a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.markdown-editor__preview a:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+}
+
+.markdown-editor__preview hr {
+  margin: 1em 0;
+  border: none;
+  border-top: 1px solid var(--border);
 }
 
 /* ── Terminal wrapper (hosts markdown-editor + terminal side by side) ─────── */

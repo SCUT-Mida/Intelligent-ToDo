@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { renderMarkdown } from '../../lib/markdownRender'
 
 interface MarkdownEditorProps {
   /** Send markdown content into the active terminal. Returns success. */
@@ -51,8 +52,8 @@ function startResizeDrag(
  * Expanded layout is 4 rows:
  *   1. Navbar — collapse toggle (left) + history button (right)
  *   2. Toolbar — markdown formatting shortcuts
- *   3. Editor — the textarea (plain Markdown input)
- *   4. Footer — copy + send-to-terminal buttons
+ *   3. Body — editor textarea (top) + optional rendered preview (bottom, 50/50)
+ *   4. Footer — preview toggle (left) + copy/send-to-terminal buttons (right)
  * Collapsed: a narrow vertical strip showing only the toggle button.
  *
  * The width is controlled by the parent's shared layout state and can be
@@ -67,6 +68,7 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
   const [content, setContent] = useState('')
   const [copied, setCopied] = useState(false)
   const [sentState, setSentState] = useState<'sent' | 'failed' | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sentTimerRef = useRef<number | null>(null)
   const copiedTimerRef = useRef<number | null>(null)
@@ -305,21 +307,46 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
             </button>
           </div>
 
-          {/* Row 3 — Editor: plain Markdown input */}
-          <div className="markdown-editor__editor-wrap">
-            <textarea
-              ref={textareaRef}
-              className="markdown-editor__textarea"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              onKeyDown={handleTextareaKeyDown}
-              placeholder="在此编写 Markdown…（Ctrl+Enter 发送到终端）"
-              spellCheck={false}
-            />
+          {/* Row 3 — Body: editor textarea (top) + optional preview (bottom, 50/50) */}
+          <div className="markdown-editor__body">
+            <div className="markdown-editor__editor-wrap">
+              <textarea
+                ref={textareaRef}
+                className="markdown-editor__textarea"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                onKeyDown={handleTextareaKeyDown}
+                placeholder="在此编写 Markdown…（Ctrl+Enter 发送到终端）"
+                spellCheck={false}
+              />
+            </div>
+
+            {previewOpen && (
+              <div
+                className={`markdown-editor__preview ${
+                  content.trim() === '' ? 'markdown-editor__preview--empty' : ''
+                }`}
+              >
+                {content.trim() === '' ? (
+                  <div className="markdown-editor__preview-empty">暂无内容</div>
+                ) : (
+                  renderMarkdown(content)
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Row 4 — Footer: copy + send-to-terminal */}
+          {/* Row 4 — Footer: preview toggle (left) + copy & send buttons (right) */}
           <div className="markdown-editor__footer">
+            <button
+              type="button"
+              className="markdown-editor__preview-btn"
+              onClick={() => setPreviewOpen((v) => !v)}
+              title={previewOpen ? '收起预览' : '展开预览'}
+            >
+              {previewOpen ? '🙈 收起预览' : '👁 预览'}
+            </button>
+
             <button
               type="button"
               className={`markdown-editor__copy-btn ${copied ? 'markdown-editor__copy-btn--copied' : ''}`}
