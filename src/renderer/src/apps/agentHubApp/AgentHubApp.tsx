@@ -251,6 +251,9 @@ export default function AgentHubApp(): JSX.Element {
         ...prev,
         [sessionId]: [...(prev[sessionId] ?? []), entry].slice(-100)
       }))
+      // Flag for persistence — without this the new entry would never be
+      // written to disk (the persist effect only saves when flagged).
+      pendingSaveRef.current++
     },
     []
   )
