@@ -33,6 +33,7 @@ export function loadSessions(): AgentHubData {
     return {
       version: 1,
       sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+      histories: (parsed.histories && typeof parsed.histories === 'object') ? parsed.histories : {},
       lastAgentId: typeof parsed.lastAgentId === 'string' ? parsed.lastAgentId : undefined,
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString()
     }

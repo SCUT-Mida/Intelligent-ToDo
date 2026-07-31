@@ -9,6 +9,7 @@ interface SessionSidebarProps {
   onNew: () => void
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
+  onHistory: (id: string) => void
 }
 
 /**
@@ -23,7 +24,8 @@ export default function SessionSidebar({
   onSelect,
   onNew,
   onDelete,
-  onRename
+  onRename,
+  onHistory
 }: SessionSidebarProps): JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -175,6 +177,16 @@ export default function SessionSidebar({
                   title="重命名"
                 >
                   ✏️
+                </button>
+                <button
+                  className="agent-hub__sidebar-item-history"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onHistory(session.id)
+                  }}
+                  title="查看提问历史"
+                >
+                  📜
                 </button>
                 <button
                   className="agent-hub__sidebar-item-delete"

@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAppContext } from '../../store/AppContext'
 import SessionSidebar from '../../components/AgentHub/SessionSidebar'
 import NewSessionDialog from '../../components/AgentHub/NewSessionDialog'
+import SessionHistoryDialog from '../../components/AgentHub/SessionHistoryDialog'
 import MarkdownEditor from '../../components/AgentHub/MarkdownEditor'
 import TerminalView from '../../components/AgentHub/TerminalView'
-import type { AgentSession, AgentDescriptor, AgentHubData } from '@shared/agentHub'
+import type { TerminalHandle } from '../../components/AgentHub/TerminalView'
+import type { AgentSession, AgentDescriptor, AgentHubData, SessionHistoryEntry } from '@shared/agentHub'
 import { createDefaultAgentHubData } from '@shared/agentHub'
 import '../../styles/agentHub.css'
 
@@ -34,6 +36,11 @@ export default function AgentHubApp(): JSX.Element {
   const [repos, setRepos] = useState<RepoEntry[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Per-session question history (keyed by session id, newest last)
+  const [histories, setHistories] = useState<Record<string, SessionHistoryEntry[]>>({})
+  // Session whose history dialog is currently open (null = closed)
+  const [historySessionId, setHistorySessionId] = useState<string | null>(null)
+
   // Dialog state
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false)
   const [pendingWorkDir, setPendingWorkDir] = useState<string | null>(null)
@@ -46,6 +53,9 @@ export default function AgentHubApp(): JSX.Element {
   const sessionsRef = useRef(sessions)
   sessionsRef.current = sessions
 
+  const historiesRef = useRef(histories)
+  historiesRef.current = histories
+
   const agentsRef = useRef(agents)
   agentsRef.current = agents
 
@@ -55,16 +65,21 @@ export default function AgentHubApp(): JSX.Element {
   const activeSessionIdRef = useRef(activeSessionId)
   activeSessionIdRef.current = activeSessionId
 
+  // Embedded terminal handles, keyed by session id (for send-to-terminal).
+  // The terminal stays mounted per session (v1.14.x PTY-persistence pattern).
+  const terminalRefs = useRef(new Map<string, TerminalHandle>())
+
   // Counter-based persistence flag
   const pendingSaveRef = useRef(0)
 
-  // Persist sessions when flagged after a state change
+  // Persist sessions + histories when flagged after a state change
   useEffect(() => {
     if (pendingSaveRef.current > 0) {
       pendingSaveRef.current = 0
       const data: AgentHubData = {
         version: 1,
         sessions,
+        histories: historiesRef.current,
         lastAgentId: selectedAgentIdRef.current,
         defaultAgentId: defaultAgentIdRef.current,
         updatedAt: new Date().toISOString()
@@ -73,7 +88,7 @@ export default function AgentHubApp(): JSX.Element {
         console.error('Failed to persist sessions', err)
       })
     }
-  }, [sessions])
+  }, [sessions, histories])
 
   // ── Initialisation (mount) ────────────────────────────────────────────
 
@@ -88,6 +103,7 @@ export default function AgentHubApp(): JSX.Element {
         setAgents(agentList)
         const data = hubData ?? createDefaultAgentHubData()
         setSessions(data.sessions)
+        setHistories(data.histories ?? {})
         if (data.lastAgentId) {
           setSelectedAgentId(data.lastAgentId)
         }
@@ -199,7 +215,65 @@ export default function AgentHubApp(): JSX.Element {
     }
     setSessions((prev) => prev.filter((s) => s.id !== id))
     setActiveSessionId((prev) => (prev === id ? null : prev))
+    // Drop the session's question history too
+    setHistories((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    // Close the history dialog if it was showing the deleted session
+    setHistorySessionId((prev) => (prev === id ? null : prev))
     pendingSaveRef.current++
+  }, [])
+
+  // ── Question history ────────────────────────────────────────────────────
+
+  // Record one entry per injection (markdown send or manual terminal paste).
+  // Capped at 100 entries per session (newest last).
+  const recordHistory = useCallback(
+    (sessionId: string, content: string, source: 'markdown' | 'paste'): void => {
+      const entry: SessionHistoryEntry = {
+        id: `hist-${Date.now().toString(36)}`,
+        at: new Date().toISOString(),
+        content,
+        source
+      }
+      setHistories((prev) => ({
+        ...prev,
+        [sessionId]: [...(prev[sessionId] ?? []), entry].slice(-100)
+      }))
+    },
+    []
+  )
+
+  // Send Markdown content into a specific session's terminal (as a paste).
+  // Each session panel owns its own Markdown editor, so the target session id
+  // is passed in explicitly instead of reading the active session.
+  const handleSendToSession = useCallback(
+    (sessionId: string, content: string): boolean => {
+      const handle = terminalRefs.current.get(sessionId)
+      if (!handle) return false
+      const ok = handle.paste(content)
+      if (ok) recordHistory(sessionId, content, 'markdown')
+      return ok
+    },
+    [recordHistory]
+  )
+
+  // Re-inject a history entry into that specific session's terminal.
+  const handleSendAgain = useCallback(
+    (sessionId: string, content: string): boolean => {
+      return handleSendToSession(sessionId, content)
+    },
+    [handleSendToSession]
+  )
+
+  const handleOpenHistory = useCallback((id: string): void => {
+    setHistorySessionId(id)
+  }, [])
+
+  const handleCloseHistory = useCallback((): void => {
+    setHistorySessionId(null)
   }, [])
 
   const handleRenameSession = useCallback((id: string, title: string): void => {
@@ -286,6 +360,7 @@ export default function AgentHubApp(): JSX.Element {
         onNew={handleOpenNewSession}
         onDelete={handleDeleteSession}
         onRename={handleRenameSession}
+        onHistory={handleOpenHistory}
       />
 
       <div className="agent-hub__main">
@@ -305,7 +380,6 @@ export default function AgentHubApp(): JSX.Element {
             </div>
           ) : (
             <div className="agent-hub__terminal-wrapper">
-              <MarkdownEditor />
               <div className="agent-hub__terminal-stack">
                 {sessions.map((s) => {
                   const isActive = s.id === activeSessionId
@@ -316,12 +390,23 @@ export default function AgentHubApp(): JSX.Element {
                       className="agent-hub__terminal-panel"
                       style={{ display: isActive ? 'flex' : 'none' }}
                     >
+                      {/* Per-session Markdown editor — each panel keeps its own
+                          content state (panels stay always-mounted via display:none). */}
+                      <MarkdownEditor onSend={(content) => handleSendToSession(s.id, content)} />
                       {s.workDir ? (
                         <div className="agent-hub__terminal-area">
                           <TerminalView
                             sessionId={s.id}
                             command={agent?.command ?? s.agentId}
                             workDir={s.workDir}
+                            ref={(handle) => {
+                              if (handle) {
+                                terminalRefs.current.set(s.id, handle)
+                              } else {
+                                terminalRefs.current.delete(s.id)
+                              }
+                            }}
+                            onPasted={(content) => recordHistory(s.id, content, 'paste')}
                           />
                         </div>
                       ) : (
@@ -356,6 +441,19 @@ export default function AgentHubApp(): JSX.Element {
           onClose={handleDialogClose}
           onCreate={handleDialogCreate}
           onAddCustomAgent={handleAddCustomAgent}
+        />
+      )}
+
+      {/* Session question history dialog */}
+      {historySessionId && (
+        <SessionHistoryDialog
+          session={sessions.find((s) => s.id === historySessionId) ?? null}
+          entries={histories[historySessionId] ?? []}
+          onClose={handleCloseHistory}
+          onCopy={(content) => {
+            navigator.clipboard.writeText(content).catch(() => {})
+          }}
+          onSendAgain={handleSendAgain}
         />
       )}
     </div>

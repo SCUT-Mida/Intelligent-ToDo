@@ -1,4 +1,9 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
+
+interface MarkdownEditorProps {
+  /** Send markdown content into the active terminal. Returns success. */
+  onSend?: (content: string) => boolean
+}
 
 /**
  * Collapsible Markdown editor panel with formatting helpers.
@@ -10,11 +15,22 @@ import { useState, useCallback, useRef } from 'react'
  * Collapsed by default. When expanded, intended to take ~30% of the terminal
  * area height (controlled by the parent's flex layout).
  */
-export default function MarkdownEditor(): JSX.Element {
+export default function MarkdownEditor({ onSend }: MarkdownEditorProps): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const [content, setContent] = useState('')
   const [copied, setCopied] = useState(false)
+  const [sentState, setSentState] = useState<'sent' | 'failed' | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const sentTimerRef = useRef<number | null>(null)
+
+  // Clear any pending send-feedback timer on unmount
+  useEffect(() => {
+    return () => {
+      if (sentTimerRef.current !== null) {
+        window.clearTimeout(sentTimerRef.current)
+      }
+    }
+  }, [])
 
   const handleToggle = useCallback((): void => {
     setExpanded((v) => !v)
@@ -133,6 +149,36 @@ export default function MarkdownEditor(): JSX.Element {
     setTimeout(() => setCopied(false), 1800)
   }, [content])
 
+  // Send feedback resets after ~1800ms; a new click clears the pending timer first.
+  const scheduleSentReset = useCallback((): void => {
+    if (sentTimerRef.current !== null) {
+      window.clearTimeout(sentTimerRef.current)
+    }
+    sentTimerRef.current = window.setTimeout(() => setSentState(null), 1800)
+  }, [])
+
+  const handleSend = useCallback((): void => {
+    if (!content.trim()) {
+      setSentState('failed')
+      scheduleSentReset()
+      return
+    }
+    const ok = onSend?.(content) ?? false
+    setSentState(ok ? 'sent' : 'failed')
+    scheduleSentReset()
+  }, [content, onSend, scheduleSentReset])
+
+  const handleTextareaKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+      // Ctrl/Cmd + Enter → send content into the active terminal
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault()
+        handleSend()
+      }
+    },
+    [handleSend]
+  )
+
   const handleTextareaChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
       setContent(e.target.value)
@@ -179,6 +225,20 @@ export default function MarkdownEditor(): JSX.Element {
             >
               {copied ? '✓ 已复制' : '复制 Markdown'}
             </button>
+
+            <button
+              className={`markdown-editor__send-btn ${
+                sentState === 'sent'
+                  ? 'markdown-editor__send-btn--sent'
+                  : sentState === 'failed'
+                    ? 'markdown-editor__send-btn--failed'
+                    : ''
+              }`}
+              onClick={handleSend}
+              title="把内容追加到当前终端的输入框"
+            >
+              {sentState === 'sent' ? '✓ 已发送' : sentState === 'failed' ? '发送失败' : '发送到终端'}
+            </button>
           </div>
         )}
       </div>
@@ -189,6 +249,7 @@ export default function MarkdownEditor(): JSX.Element {
           className="markdown-editor__textarea"
           value={content}
           onChange={handleTextareaChange}
+          onKeyDown={handleTextareaKeyDown}
           placeholder="在此编写 Markdown…"
           spellCheck={false}
         />

@@ -1,7 +1,12 @@
-import { useEffect, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+
+export interface TerminalHandle {
+  /** Inject text into the terminal as a paste. Returns false if terminal not ready. */
+  paste: (text: string) => boolean
+}
 
 interface TerminalViewProps {
   /** Unique session id — used to match PTY data events. */
@@ -12,6 +17,8 @@ interface TerminalViewProps {
   workDir: string
   /** Called when the PTY process exits. */
   onExit?: (exitCode: number) => void
+  /** Called after a paste (manual or injected) successfully lands in the terminal. */
+  onPasted?: (content: string) => void
 }
 
 /**
@@ -29,9 +36,29 @@ interface TerminalViewProps {
  * This gives 100% native CLI interaction — slash commands, TUI rendering,
  * ANSI colors, cursor movement — everything works because it's a real PTY.
  */
-export default function TerminalView({ sessionId, command, workDir, onExit }: TerminalViewProps): JSX.Element {
+const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function TerminalView(
+  { sessionId, command, workDir, onExit, onPasted }: TerminalViewProps,
+  ref
+): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
+
+  // Keep the latest onPasted callback in a ref — the main effect deps MUST NOT
+  // include it (re-running the effect would recreate the PTY and kill the terminal).
+  const onPastedRef = useRef(onPasted)
+  onPastedRef.current = onPasted
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      paste: (text: string): boolean => {
+        if (!terminalRef.current) return false
+        terminalRef.current.paste(text)
+        return true
+      }
+    }),
+    []
+  )
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -136,12 +163,16 @@ export default function TerminalView({ sessionId, command, workDir, onExit }: Te
       if (clipText) {
         // clipboardData has the text — inject straight to the terminal (no IPC round-trip)
         term.paste(clipText)
+        onPastedRef.current?.(clipText)
       } else {
         // clipboardData empty (Electron async-clipboard quirk) → read via main process
         window.agentHub
           .readClipboard()
           .then((text) => {
-            if (text && terminalRef.current) terminalRef.current.paste(text)
+            if (text && terminalRef.current) {
+              terminalRef.current.paste(text)
+              onPastedRef.current?.(text)
+            }
           })
           .catch((err: unknown) => {
             console.error('[TerminalView] readClipboard failed', err)
@@ -168,4 +199,6 @@ export default function TerminalView({ sessionId, command, workDir, onExit }: Te
   }, [sessionId, command, workDir, onExit])
 
   return <div ref={containerRef} className="terminal-view__container" />
-}
+})
+
+export default TerminalView

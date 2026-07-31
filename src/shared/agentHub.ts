@@ -138,17 +138,29 @@ export interface AgentSession {
   lastLaunchedAt: string | null
 }
 
+export interface SessionHistoryEntry {
+  id: string
+  /** ISO timestamp of the send/paste */
+  at: string
+  /** The content injected into the terminal */
+  content: string
+  /** Source: markdown editor send button or manual terminal paste */
+  source: 'markdown' | 'paste'
+}
+
 export interface AgentHubData {
   version: 1
   sessions: AgentSession[]
   lastAgentId?: string
   /** Default agent for quick-launch (e.g. from RepoNav jump). Skips the dialog. */
   defaultAgentId?: string
+  /** Per-session question history (keyed by session id). Newest last. */
+  histories: Record<string, SessionHistoryEntry[]>
   updatedAt: string
 }
 
 export function createDefaultAgentHubData(): AgentHubData {
-  return { version: 1, sessions: [], updatedAt: new Date().toISOString() }
+  return { version: 1, sessions: [], histories: {}, updatedAt: new Date().toISOString() }
 }
 
 // ── IPC payload types ──────────────────────────────────────────────────────
