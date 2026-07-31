@@ -148,8 +148,10 @@ export interface SessionHistoryEntry {
   id: string
   /** ISO timestamp of the send/paste */
   at: string
-  /** The content injected into the terminal */
+  /** The markdown content injected into the terminal (without the slash command) */
   content: string
+  /** Slash command name (no leading '/') selected for this send, if any */
+  command?: string
   /** Source: markdown editor send button or manual terminal paste */
   source: 'markdown' | 'paste'
 }

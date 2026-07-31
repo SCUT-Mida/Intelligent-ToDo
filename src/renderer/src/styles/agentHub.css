@@ -939,6 +939,12 @@
   color: var(--primary);
 }
 
+.session-history-dialog__badge--command {
+  background: color-mix(in srgb, var(--primary) 15%, transparent);
+  color: var(--primary);
+  font-family: Consolas, 'Cascadia Code', 'SF Mono', monospace;
+}
+
 .session-history-dialog__badge--paste {
   background: rgba(100, 116, 139, 0.12);
   color: #64748b;
@@ -1075,7 +1081,123 @@
   color: var(--primary);
 }
 
-/* Row 2 — Toolbar: markdown formatting shortcuts only */
+/* Row 2 — Command bar: agent slash commands, visually SEPARATE from the
+   input box. Probe button (left) + command chips (right). */
+.markdown-editor__command-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px 8px;
+  flex-shrink: 0;
+  min-height: 34px;
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown-editor__probe-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  background: var(--primary-soft);
+  border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+
+.markdown-editor__probe-btn:hover {
+  background: color-mix(in srgb, var(--primary) 20%, var(--primary-soft));
+  color: var(--primary-hover);
+}
+
+.markdown-editor__command-bar-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.markdown-editor__command-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.markdown-editor__command-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+  font-family: Consolas, 'Cascadia Code', 'SF Mono', monospace;
+}
+
+.markdown-editor__command-chip:hover {
+  background: var(--primary-soft);
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  color: var(--primary);
+}
+
+.markdown-editor__command-chip--selected {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.markdown-editor__command-chip--selected:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+  color: #fff;
+}
+
+/* Selected-command indicator shown between the probe button and the chips.
+   Displays "/<command> ✕" and clears the selection when clicked. */
+.markdown-editor__command-selected {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 55%, transparent);
+  border-radius: 11px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  font-family: Consolas, 'Cascadia Code', 'SF Mono', monospace;
+  flex-shrink: 0;
+}
+
+.markdown-editor__command-selected:hover {
+  background: color-mix(in srgb, var(--primary) 30%, transparent);
+  color: var(--primary-hover);
+}
+
+/* Row 3 — Toolbar: markdown formatting shortcuts only */
 .markdown-editor__toolbar {
   display: flex;
   align-items: center;
@@ -1105,18 +1227,6 @@
 .markdown-editor__toolbar-btn:hover {
   background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text);
-}
-
-/* Explicit slash-command trigger — accent color so it stands out from the
-   formatting shortcuts (it's the ONLY button that probes the live terminal). */
-.markdown-editor__toolbar-btn--slash {
-  color: var(--primary);
-  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
-}
-
-.markdown-editor__toolbar-btn--slash:hover {
-  background: var(--primary-soft);
-  color: var(--primary);
 }
 
 .markdown-editor__toolbar-sep {
@@ -1220,78 +1330,13 @@
   color: var(--text-faint);
 }
 
-/* ── Slash-command palette (overlays the textarea, terminal-like / menu) ──── */
+/* ── Editor wrap (plain Markdown input, no command palette) ───────────────── */
 
 .markdown-editor__editor-wrap {
   position: relative;
   flex: 1;
   display: flex;
   min-height: 0;
-}
-
-.markdown-editor__slash-menu {
-  position: absolute;
-  top: 4px;
-  left: 8px;
-  right: 8px;
-  z-index: 30;
-  max-height: 220px;
-  overflow-y: auto;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.markdown-editor__slash-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  font-family: inherit;
-  text-align: left;
-  color: var(--text);
-}
-
-.markdown-editor__slash-menu-item:hover,
-.markdown-editor__slash-menu-item--active {
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-
-.markdown-editor__slash-menu-item-code {
-  font-weight: 700;
-  font-family: Consolas, 'Cascadia Code', monospace;
-}
-
-.markdown-editor__slash-menu-item-name {
-  opacity: 0.85;
-}
-
-.markdown-editor__slash-menu-item-desc {
-  margin-left: auto;
-  font-size: 12px;
-  opacity: 0.6;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 160px;
-}
-
-.markdown-editor__slash-menu-empty {
-  padding: 8px 10px;
-  font-size: 13px;
-  color: var(--text-muted);
 }
 
 /* ── Terminal wrapper (hosts markdown-editor + terminal side by side) ─────── */

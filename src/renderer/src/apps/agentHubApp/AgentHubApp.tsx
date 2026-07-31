@@ -240,13 +240,20 @@ export default function AgentHubApp(): JSX.Element {
   // ── Question history ────────────────────────────────────────────────────
 
   // Record one entry per injection (markdown send or manual terminal paste).
-  // Capped at 100 entries per session (newest last).
+  // Capped at 100 entries per session (newest last). A markdown send may carry
+  // an optional slash command (stored separately so re-edit can restore both).
   const recordHistory = useCallback(
-    (sessionId: string, content: string, source: 'markdown' | 'paste'): void => {
+    (
+      sessionId: string,
+      content: string,
+      source: 'markdown' | 'paste',
+      command?: string
+    ): void => {
       const entry: SessionHistoryEntry = {
         id: `hist-${Date.now().toString(36)}`,
         at: new Date().toISOString(),
         content,
+        command,
         source
       }
       setHistories((prev) => ({
@@ -257,15 +264,18 @@ export default function AgentHubApp(): JSX.Element {
     []
   )
 
-  // Send Markdown content into a specific session's terminal (as a paste).
-  // Each session panel owns its own Markdown editor, so the target session id
-  // is passed in explicitly instead of reading the active session.
+  // Send Markdown content (optionally prefixed by a selected slash command)
+  // into a specific session's terminal (as a paste). The command and content
+  // are joined with a single space: "/<command> <content>". Each session panel
+  // owns its own Markdown editor, so the target session id is passed in
+  // explicitly instead of reading the active session.
   const handleSendToSession = useCallback(
-    (sessionId: string, content: string): boolean => {
+    (sessionId: string, content: string, command?: string): boolean => {
       const handle = terminalRefs.current.get(sessionId)
       if (!handle) return false
-      const ok = handle.paste(content)
-      if (ok) recordHistory(sessionId, content, 'markdown')
+      const text = command ? `/${command}${content.trim() ? ' ' + content.trim() : ''}` : content
+      const ok = handle.paste(text)
+      if (ok) recordHistory(sessionId, content, 'markdown', command)
       return ok
     },
     [recordHistory]
@@ -279,12 +289,16 @@ export default function AgentHubApp(): JSX.Element {
     setHistorySessionId(null)
   }, [])
 
-  // Load a history entry back into that session's markdown editor for editing,
-  // then close the dialog. The editor handle expands the panel if it was collapsed.
-  const handleReEdit = useCallback((sessionId: string, content: string): void => {
-    markdownRefs.current.get(sessionId)?.setContent(content)
-    setHistorySessionId(null)
-  }, [])
+  // Load a history entry back into that session's markdown editor for editing
+  // (restoring both the content and the selected command), then close the
+  // dialog. The editor handle expands the panel if it was collapsed.
+  const handleReEdit = useCallback(
+    (sessionId: string, content: string, command?: string): void => {
+      markdownRefs.current.get(sessionId)?.setContent(content, command)
+      setHistorySessionId(null)
+    },
+    []
+  )
 
   const handleRenameSession = useCallback((id: string, title: string): void => {
     setSessions((prev) =>
@@ -322,8 +336,9 @@ export default function AgentHubApp(): JSX.Element {
       })
   }, [agents])
 
-  // Probe the active session's terminal once it's focused, so the "/" palette
-  // is pre-populated. Subsequent opens refresh via onSlashOpen (debounced above).
+  // Probe the active session's terminal once it's focused, so the command bar
+  // is pre-populated. Subsequent refreshes come from the "⚡ 命令" button
+  // (debounced above).
   useEffect(() => {
     if (activeSessionId) probeSessionCommands(activeSessionId)
   }, [activeSessionId, probeSessionCommands])
@@ -435,7 +450,7 @@ export default function AgentHubApp(): JSX.Element {
                       <MarkdownEditor
                         width={mdWidth}
                         commands={sessionCommands[s.id] ?? []}
-                        onSlashOpen={() => probeSessionCommands(s.id)}
+                        onProbeCommands={() => probeSessionCommands(s.id)}
                         onResize={(w) => setMdWidth(w)}
                         onOpenHistory={() => handleOpenHistory(s.id)}
                         ref={(handle) => {
@@ -445,7 +460,7 @@ export default function AgentHubApp(): JSX.Element {
                             markdownRefs.current.delete(s.id)
                           }
                         }}
-                        onSend={(content) => handleSendToSession(s.id, content)}
+                        onSend={(content, command) => handleSendToSession(s.id, content, command)}
                       />
                       {s.workDir ? (
                         <div className="agent-hub__terminal-area">
@@ -506,7 +521,7 @@ export default function AgentHubApp(): JSX.Element {
           session={historySession}
           entries={histories[historySession.id] ?? []}
           onClose={handleCloseHistory}
-          onReEdit={(entry) => handleReEdit(historySession.id, entry.content)}
+          onReEdit={(entry) => handleReEdit(historySession.id, entry.content, entry.command)}
         />
       )}
     </div>
