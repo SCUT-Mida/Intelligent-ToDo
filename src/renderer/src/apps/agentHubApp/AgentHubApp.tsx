@@ -259,10 +259,10 @@ export default function AgentHubApp(): JSX.Element {
   // Each session panel owns its own Markdown editor, so the target session id
   // is passed in explicitly instead of reading the active session.
   const handleSendToSession = useCallback(
-    (sessionId: string, content: string): boolean => {
+    (sessionId: string, content: string, submit?: boolean): boolean => {
       const handle = terminalRefs.current.get(sessionId)
       if (!handle) return false
-      const ok = handle.paste(content)
+      const ok = handle.paste(content, submit)
       if (ok) recordHistory(sessionId, content, 'markdown')
       return ok
     },
@@ -414,7 +414,7 @@ export default function AgentHubApp(): JSX.Element {
                             markdownRefs.current.delete(s.id)
                           }
                         }}
-                        onSend={(content) => handleSendToSession(s.id, content)}
+                        onSend={(content, submit) => handleSendToSession(s.id, content, submit)}
                       />
                       {s.workDir ? (
                         <div className="agent-hub__terminal-area">

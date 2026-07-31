@@ -3,7 +3,7 @@ import { renderMarkdown } from '../../lib/markdownRender'
 
 interface MarkdownEditorProps {
   /** Send markdown content into the active terminal. Returns success. */
-  onSend?: (content: string) => boolean
+  onSend?: (content: string, submit?: boolean) => boolean
   /** Expanded editor width in px (shared across sessions, controlled by the parent). */
   width: number
   /** Called while the user drags the editor's right-edge resizer. */
@@ -69,6 +69,7 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
   const [copied, setCopied] = useState(false)
   const [sentState, setSentState] = useState<'sent' | 'failed' | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [autoSubmit, setAutoSubmit] = useState(true)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sentTimerRef = useRef<number | null>(null)
   const copiedTimerRef = useRef<number | null>(null)
@@ -245,10 +246,10 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
       scheduleSentReset()
       return
     }
-    const ok = onSend?.(content) ?? false
+    const ok = onSend?.(content, autoSubmit) ?? false
     setSentState(ok ? 'sent' : 'failed')
     scheduleSentReset()
-  }, [content, onSend, scheduleSentReset])
+  }, [content, onSend, autoSubmit, scheduleSentReset])
 
   const handleTextareaKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -355,6 +356,18 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
             >
               {copied ? '✓ 已复制' : '复制 Markdown'}
             </button>
+
+            <label
+              className="markdown-editor__submit-check"
+              title="勾选时发送到终端并自动回车，让 Agent 立即响应；取消勾选则仅粘贴内容"
+            >
+              <input
+                type="checkbox"
+                checked={autoSubmit}
+                onChange={(e) => setAutoSubmit(e.target.checked)}
+              />
+              <span>发送后回车</span>
+            </label>
 
             <button
               type="button"

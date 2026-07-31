@@ -5,7 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 
 export interface TerminalHandle {
   /** Inject text into the terminal as a paste. Returns false if terminal not ready. */
-  paste: (text: string) => boolean
+  paste: (text: string, submit?: boolean) => boolean
 }
 
 interface TerminalViewProps {
@@ -58,9 +58,15 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
   useImperativeHandle(
     ref,
     () => ({
-      paste: (text: string): boolean => {
+      paste: (text: string, submit?: boolean): boolean => {
         if (!terminalRef.current) return false
         terminalRef.current.paste(text)
+        // When submit is requested, send a carriage return OUTSIDE the
+        // bracketed-paste wrapping (term.paste) so the agent acts immediately.
+        // A raw '\r' inside the paste markers would just be treated as content.
+        if (submit === true) {
+          window.agentHub.sendInput(sessionId, '\r')
+        }
         return true
       }
     }),
