@@ -1,20 +1,8 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import type { AgentCommandDef } from '@shared/agentHub'
 
 interface MarkdownEditorProps {
-  /** Send content (optionally prefixed by the selected slash command) into the
-   *  active terminal. The command, if any, is sent as "/<command> <content>"
-   *  — one space between. Returns success. */
-  onSend?: (content: string, command?: string) => boolean
-  /**
-   * Slash commands the session's agent supports (live-probed from its
-   * terminal). Shown as clickable chips in the command bar — clicking one
-   * selects it as the "current command"; the selected command is joined with
-   * the editor content (one space) when sending.
-   */
-  commands: AgentCommandDef[]
-  /** Called when the "⚡ 命令" button is clicked — re-probes the live terminal. */
-  onProbeCommands?: () => void
+  /** Send markdown content into the active terminal. Returns success. */
+  onSend?: (content: string) => boolean
   /** Expanded editor width in px (shared across sessions, controlled by the parent). */
   width: number
   /** Called while the user drags the editor's right-edge resizer. */
@@ -24,9 +12,8 @@ interface MarkdownEditorProps {
 }
 
 export interface MarkdownHandle {
-  /** Replace the editor content (and optionally the selected command) and
-   *  expand the panel (used by history re-edit). */
-  setContent: (text: string, command?: string) => void
+  /** Replace the editor content and expand the panel (used by history re-edit). */
+  setContent: (text: string) => void
 }
 
 /**
@@ -59,17 +46,13 @@ function startResizeDrag(
 }
 
 /**
- * Collapsible Markdown editor panel with a command bar and formatting helpers.
+ * Collapsible Markdown editor panel with formatting helpers.
  *
- * Expanded layout is 5 rows:
+ * Expanded layout is 4 rows:
  *   1. Navbar — collapse toggle (left) + history button (right)
- *   2. Command bar — "⚡ 命令" probe button + the agent's slash commands as
- *      clickable chips. This row is completely separate from the input box:
- *      clicking a chip SELECTS it as the current command (highlighted);
- *      the command is joined with the content when sending to the terminal.
- *   3. Toolbar — markdown formatting shortcuts
- *   4. Editor — the textarea (plain Markdown input, no command palette)
- *   5. Footer — copy + send-to-terminal buttons
+ *   2. Toolbar — markdown formatting shortcuts
+ *   3. Editor — the textarea (plain Markdown input)
+ *   4. Footer — copy + send-to-terminal buttons
  * Collapsed: a narrow vertical strip showing only the toggle button.
  *
  * The width is controlled by the parent's shared layout state and can be
@@ -77,13 +60,11 @@ function startResizeDrag(
  * (MarkdownHandle.setContent) for loading a history entry back into the editor.
  */
 const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { onSend, width, onResize, onOpenHistory, commands, onProbeCommands }: MarkdownEditorProps,
+  { onSend, width, onResize, onOpenHistory }: MarkdownEditorProps,
   ref
 ): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const [content, setContent] = useState('')
-  /** Currently selected slash command name (no leading '/'), if any. */
-  const [selectedCommand, setSelectedCommand] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [sentState, setSentState] = useState<'sent' | 'failed' | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -95,9 +76,8 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
   useImperativeHandle(
     ref,
     () => ({
-      setContent: (text: string, command?: string): void => {
+      setContent: (text: string): void => {
         setContent(text)
-        setSelectedCommand(command ?? null)
         setExpanded(true)
       }
     }),
@@ -258,25 +238,15 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
   }, [])
 
   const handleSend = useCallback((): void => {
-    // Nothing to send when both the command and the content are empty.
-    if (!selectedCommand && !content.trim()) {
+    if (!content.trim()) {
       setSentState('failed')
       scheduleSentReset()
       return
     }
-    const ok = onSend?.(content, selectedCommand ?? undefined) ?? false
+    const ok = onSend?.(content) ?? false
     setSentState(ok ? 'sent' : 'failed')
     scheduleSentReset()
-  }, [content, selectedCommand, onSend, scheduleSentReset])
-
-  // Toggle a command as "selected". The command is stored separately from the
-  // content — the parent joins them with a single space when sending.
-  const toggleCommand = useCallback(
-    (command: AgentCommandDef): void => {
-      setSelectedCommand((prev) => (prev === command.name ? null : command.name))
-    },
-    []
-  )
+  }, [content, onSend, scheduleSentReset])
 
   const handleTextareaKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -288,10 +258,6 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
     },
     [handleSend]
   )
-
-  const handleProbeCommands = useCallback((): void => {
-    onProbeCommands?.()
-  }, [onProbeCommands])
 
   return (
     <div
@@ -317,53 +283,7 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
 
       {expanded && (
         <>
-          {/* Row 2 — Command bar: agent slash commands, SEPARATE from the input box.
-              The "⚡ 命令" button re-probes the live terminal; command chips are
-              toggled as the "current command" — joined with the content (one
-              space) when sending to the terminal. */}
-          <div className="markdown-editor__command-bar">
-            <button
-              type="button"
-              className="markdown-editor__probe-btn"
-              onClick={handleProbeCommands}
-              title="从当前终端探测 Agent 的斜杠命令"
-            >
-              ⚡ 命令
-            </button>
-            {selectedCommand && (
-              <button
-                type="button"
-                className="markdown-editor__command-selected"
-                onClick={() => setSelectedCommand(null)}
-                title={`当前命令：/${selectedCommand}（点击取消）`}
-              >
-                /{selectedCommand} ✕
-              </button>
-            )}
-            {commands.length === 0 ? (
-              <span className="markdown-editor__command-bar-hint">
-                点击「⚡ 命令」探测当前 Agent 支持的斜杠命令
-              </span>
-            ) : (
-              <div className="markdown-editor__command-chips">
-                {commands.map((c) => (
-                  <button
-                    type="button"
-                    key={c.name}
-                    className={`markdown-editor__command-chip ${
-                      selectedCommand === c.name ? 'markdown-editor__command-chip--selected' : ''
-                    }`}
-                    onClick={() => toggleCommand(c)}
-                    title={c.description}
-                  >
-                    /{c.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Row 3 — Toolbar: markdown formatting shortcuts only */}
+          {/* Row 2 — Toolbar: markdown formatting shortcuts only */}
           <div className="markdown-editor__toolbar">
             <button type="button" className="markdown-editor__toolbar-btn" onClick={handleBold} title="加粗">
               <strong>B</strong>
@@ -385,7 +305,7 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
             </button>
           </div>
 
-          {/* Row 4 — Editor: plain Markdown input (no command palette) */}
+          {/* Row 3 — Editor: plain Markdown input */}
           <div className="markdown-editor__editor-wrap">
             <textarea
               ref={textareaRef}
@@ -393,12 +313,12 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
               value={content}
               onChange={(e) => setContent(e.target.value)}
               onKeyDown={handleTextareaKeyDown}
-              placeholder="在此编写 Markdown…（点击上方命令栏的命令，发送时会与内容拼接）"
+              placeholder="在此编写 Markdown…（Ctrl+Enter 发送到终端）"
               spellCheck={false}
             />
           </div>
 
-          {/* Row 5 — Footer: copy + send-to-terminal */}
+          {/* Row 4 — Footer: copy + send-to-terminal */}
           <div className="markdown-editor__footer">
             <button
               type="button"

@@ -36,10 +36,6 @@ export const AGENT_IPC = {
    PROBE_AGENT: 'agentHub:probeAgent',
    /** Load cached repo index from repoNav (for workDir dropdown). */
    GET_REPO_INDEX: 'agentHub:getRepoIndex',
-   /** List the slash commands an agent supports. LIVE-probed from the running
-    *  PTY (inject "/", parse the menu the agent renders, dismiss with Esc);
-    *  falls back to scanning command files when no terminal is available. */
-   LIST_COMMANDS: 'agentHub:listCommands',
 
    // ── Embedded PTY (terminal inside the app window) ──
    /** Create a PTY session. Returns the session id. */
@@ -148,10 +144,8 @@ export interface SessionHistoryEntry {
   id: string
   /** ISO timestamp of the send/paste */
   at: string
-  /** The markdown content injected into the terminal (without the slash command) */
+  /** The content injected into the terminal */
   content: string
-  /** Slash command name (no leading '/') selected for this send, if any */
-  command?: string
   /** Source: markdown editor send button or manual terminal paste */
   source: 'markdown' | 'paste'
 }
@@ -188,16 +182,4 @@ export interface AgentProbeResult {
   ok: boolean
   output?: string
   resolvedPath?: string
-}
-
-/**
- * A slash command the agent supports. PRIMARY source is a live terminal probe
- * (the agent renders its own "/" menu in the PTY and we parse that output);
- * the config-file scan is only the offline fallback.
- */
-export interface AgentCommandDef {
-  /** Slash-command name, e.g. 'ulw-loop' or 'opsx/apply'. */
-  name: string
-  /** Human-readable description from the command file. */
-  description: string
 }

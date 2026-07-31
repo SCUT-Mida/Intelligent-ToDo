@@ -10,8 +10,7 @@ import type {
   AgentHubData,
   LaunchPayload,
   LaunchResult,
-  AgentProbeResult,
-  AgentCommandDef
+  AgentProbeResult
 } from '../shared/agentHub'
 
 // V2 IPC channels for AI memory features (will be moved to shared IPC_V2 when backend lands)
@@ -124,9 +123,6 @@ const agentHub = {
   probeAgent: (command: string): Promise<AgentProbeResult> => ipcRenderer.invoke(AGENT_IPC.PROBE_AGENT, command),
   /** Load cached repo index from repoNav (for workDir dropdown). */
   getRepoIndex: (): Promise<unknown> => ipcRenderer.invoke(AGENT_IPC.GET_REPO_INDEX),
-  /** List the slash commands the agent supports — live-probed from the terminal. */
-  listCommands: (sessionId: string, command: string, workDir: string): Promise<AgentCommandDef[]> =>
-    ipcRenderer.invoke(AGENT_IPC.LIST_COMMANDS, sessionId, command, workDir),
 
   // ── Embedded PTY (terminal inside the app window) ──
   /** Create a PTY session for embedded terminal. Returns true on success. */

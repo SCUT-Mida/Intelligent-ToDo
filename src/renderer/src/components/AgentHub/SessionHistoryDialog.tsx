@@ -73,11 +73,6 @@ export default function SessionHistoryDialog({
                   <span className="session-history-dialog__time">
                     {new Date(entry.at).toLocaleString('zh-CN', { hour12: false })}
                   </span>
-                  {entry.command && (
-                    <span className="session-history-dialog__badge session-history-dialog__badge--command">
-                      /{entry.command}
-                    </span>
-                  )}
                   <span
                     className={`session-history-dialog__badge session-history-dialog__badge--${entry.source}`}
                   >

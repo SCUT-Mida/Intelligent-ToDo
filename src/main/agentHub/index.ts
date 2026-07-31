@@ -12,11 +12,10 @@ import { execFileSync } from 'child_process'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { AGENT_IPC } from '../../shared/agentHub'
-import type { AgentHubData, AgentProbeResult, LaunchPayload, LaunchResult, AgentCommandDef } from '../../shared/agentHub'
+import type { AgentHubData, AgentProbeResult, LaunchPayload, LaunchResult } from '../../shared/agentHub'
 import { detectAgents } from './detect'
 import { loadSessions, saveSessions } from './persistence'
-import { createPty, sendInput, resizePty, killPty, killAllPtys, probeCommands } from './pty'
-import { listAgentCommands } from './commands'
+import { createPty, sendInput, resizePty, killPty, killAllPtys } from './pty'
 import { openRepoInTerminal } from '../repoNav/launcher'
 import { getConfig as getRepoNavConfig } from '../repoNav/config'
 import { logger } from '../logger'
@@ -95,27 +94,6 @@ export function registerAgentHubIpc(ipc: typeof ipcMain): void {
       return null
     } catch { return null }
   })
-
-  // LIST_COMMANDS: slash commands the agent supports. PRIMARY source is a live
-  // terminal probe — we inject "/" into the running PTY and parse the menu the
-  // agent renders itself (works for any agent, matches the real terminal exactly).
-  // FALLBACK (no PTY / terminal busy) is a scan of the command files the CLI
-  // would read, using the 5-agent config mapping (opencode/nga, claude/codeagent, hermes).
-  ipc.handle(
-    AGENT_IPC.LIST_COMMANDS,
-    async (_e, sessionId: string, command: string, workDir: string): Promise<AgentCommandDef[]> => {
-      try {
-        const probed = await probeCommands(sessionId)
-        if (probed.length > 0) return probed
-        return listAgentCommands(command, workDir)
-      } catch (err) {
-        logger.error('agentHub:ipc', 'LIST_COMMANDS failed', {
-          error: err instanceof Error ? err.message : String(err)
-        })
-        return []
-      }
-    }
-  )
 
   // ── Embedded PTY handlers ────────────────────────────────────────────────
   ipc.handle(AGENT_IPC.PTY_CREATE, (e, sessionId: string, command: string, workDir: string, cols: number, rows: number) => {
