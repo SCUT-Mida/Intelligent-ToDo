@@ -15,6 +15,8 @@ interface TerminalViewProps {
   command: string
   /** Working directory for the PTY. */
   workDir: string
+  /** Whether this terminal panel is the currently visible one. */
+  active: boolean
   /** Called when the PTY process exits. */
   onExit?: (exitCode: number) => void
   /** Called after a paste (manual or injected) successfully lands in the terminal. */
@@ -37,7 +39,7 @@ interface TerminalViewProps {
  * ANSI colors, cursor movement — everything works because it's a real PTY.
  */
 const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function TerminalView(
-  { sessionId, command, workDir, onExit, onPasted }: TerminalViewProps,
+  { sessionId, command, workDir, active, onExit, onPasted }: TerminalViewProps,
   ref
 ): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -234,6 +236,29 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
       terminalRef.current = null
     }
   }, [sessionId, command, workDir, onExit])
+
+  // Scroll to the latest output when the panel becomes visible again. Panels
+  // stay always-mounted and are hidden via display:none; when React flips the
+  // style back to 'flex', xterm's viewport re-appears at the TOP of the
+  // scrollback, forcing the user to scroll down after every session switch.
+  // Must be a SEPARATE effect — adding `active` to the main effect's deps
+  // would recreate the PTY and kill the terminal session.
+  useEffect(() => {
+    if (!active) return
+    // Double rAF: the first waits for the display:none→flex switch to lay out,
+    // the second lets the ResizeObserver-driven fit() resize settle so the
+    // scroll position actually lands at the bottom.
+    let second = 0
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => {
+        terminalRef.current?.scrollToBottom()
+      })
+    })
+    return () => {
+      cancelAnimationFrame(first)
+      cancelAnimationFrame(second)
+    }
+  }, [active])
 
   return <div ref={containerRef} className="terminal-view__container" />
 })
