@@ -9,7 +9,6 @@ interface SessionSidebarProps {
   onNew: () => void
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
-  onHistory: (id: string) => void
   /** Whether the sidebar is collapsed to a narrow strip. */
   collapsed: boolean
   /** Expanded sidebar width in px (controlled by the parent). */
@@ -52,7 +51,8 @@ function startResizeDrag(
 /**
  * Session sidebar — shows a list of saved agent launch sessions.
  * New session button at top, sessions sorted by lastLaunchedAt (recent first),
- * then by createdAt. Supports click-to-select, hover-delete, double-click-rename.
+ * then by createdAt. Supports click-to-select, always-visible rename/delete
+ * actions, and double-click-rename. Never-launched sessions show a 新建 badge.
  *
  * Collapsible to a narrow strip (expand ☰ + new-session ＋); when expanded the
  * width is controlled by the parent and adjustable with the right-edge resizer.
@@ -65,7 +65,6 @@ export default function SessionSidebar({
   onNew,
   onDelete,
   onRename,
-  onHistory,
   collapsed,
   width,
   onToggleCollapse,
@@ -128,8 +127,7 @@ export default function SessionSidebar({
     return parts[parts.length - 1] ?? ''
   }
 
-  function relativeTime(iso: string | null): string {
-    if (!iso) return '从未启动'
+  function relativeTime(iso: string): string {
     const diff = Date.now() - new Date(iso).getTime()
     const seconds = Math.floor(diff / 1000)
     if (seconds < 60) return '刚刚'
@@ -230,11 +228,16 @@ export default function SessionSidebar({
                         <span>·</span>
                       </>
                     )}
-                    <span>{relativeTime(session.lastLaunchedAt)}</span>
+                    {session.lastLaunchedAt ? (
+                      <span>{relativeTime(session.lastLaunchedAt)}</span>
+                    ) : (
+                      <span className="agent-hub__sidebar-item-new">新建</span>
+                    )}
                   </div>
                 </div>
                 <button
-                  className="agent-hub__sidebar-item-rename"
+                  type="button"
+                  className="agent-hub__sidebar-item-action"
                   onClick={(e) => {
                     e.stopPropagation()
                     handleDoubleClick(session.id, session.title)
@@ -244,17 +247,8 @@ export default function SessionSidebar({
                   ✏️
                 </button>
                 <button
-                  className="agent-hub__sidebar-item-history"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onHistory(session.id)
-                  }}
-                  title="查看提问历史"
-                >
-                  📜
-                </button>
-                <button
-                  className="agent-hub__sidebar-item-delete"
+                  type="button"
+                  className="agent-hub__sidebar-item-action agent-hub__sidebar-item-action--danger"
                   onClick={(e) => {
                     e.stopPropagation()
                     onDelete(session.id)

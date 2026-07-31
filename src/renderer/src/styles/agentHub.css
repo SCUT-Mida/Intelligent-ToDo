@@ -243,29 +243,6 @@
   font-weight: 500;
 }
 
-.agent-hub__sidebar-item-delete {
-  opacity: 0;
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--text-faint);
-  transition: opacity 0.12s, background 0.12s, color 0.12s;
-}
-
-.agent-hub__sidebar-item:hover .agent-hub__sidebar-item-delete {
-  opacity: 1;
-}
-
-.agent-hub__sidebar-item-delete:hover {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
 .agent-hub__sidebar-item-title-input {
   width: 100%;
   font-size: 13px;
@@ -755,54 +732,46 @@
   font-style: italic;
 }
 
-/* ── Session sidebar rename button ───────────────────────────────────────── */
+/* ── Session sidebar item actions & new-session badge ───────────────────── */
 
-.agent-hub__sidebar-item-rename {
-  opacity: 0;
+/* Always-visible row actions (rename ✏️, delete 🗑) — muted at rest, colored on hover */
+.agent-hub__sidebar-item-action {
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: transparent;
+  border: none;
   border-radius: var(--radius-sm);
-  font-size: 12px;
-  color: var(--text-faint);
-  transition: opacity 0.12s, background 0.12s, color 0.12s;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
 }
 
-.agent-hub__sidebar-item:hover .agent-hub__sidebar-item-rename {
-  opacity: 1;
-}
-
-.agent-hub__sidebar-item-rename:hover {
+.agent-hub__sidebar-item-action:hover {
   background: var(--primary-soft);
   color: var(--primary);
 }
 
-/* ── Session sidebar history button ──────────────────────────────────────── */
+.agent-hub__sidebar-item-action--danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
 
-.agent-hub__sidebar-item-history {
-  opacity: 0;
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  display: flex;
+/* Badge shown instead of a relative time for never-launched sessions */
+.agent-hub__sidebar-item-new {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  color: var(--text-faint);
-  transition: opacity 0.12s, background 0.12s, color 0.12s;
-}
-
-.agent-hub__sidebar-item:hover .agent-hub__sidebar-item-history {
-  opacity: 1;
-}
-
-.agent-hub__sidebar-item-history:hover {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
   background: var(--primary-soft);
   color: var(--primary);
+  flex-shrink: 0;
 }
 
 /* ── New Session Dialog ──────────────────────────────────────────────────── */
@@ -991,9 +960,25 @@
   gap: 8px;
 }
 
-.session-history-dialog__action-btn {
+.session-history-dialog__reedit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 4px 12px;
   font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-family: inherit;
+  transition: background 0.12s, color 0.12s;
+}
+
+.session-history-dialog__reedit-btn:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
 }
 
 .session-history-dialog__empty {
@@ -1025,7 +1010,7 @@
   align-items: stretch;
 }
 
-.markdown-editor--collapsed .markdown-editor__header {
+.markdown-editor--collapsed .markdown-editor__navbar {
   flex: 1;
   flex-direction: column;
   align-items: center;
@@ -1056,34 +1041,60 @@
   color: var(--text);
 }
 
-.markdown-editor__header {
+/* Row 1 — Navbar: toggle (left) + history button (right) */
+.markdown-editor__navbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 6px 8px;
   flex-shrink: 0;
   min-height: 36px;
 }
 
+.markdown-editor__history-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.markdown-editor__history-btn:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+/* Row 2 — Toolbar: markdown formatting shortcuts only */
 .markdown-editor__toolbar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
-  flex: 1;
+  padding: 0 8px 6px;
 }
 
 .markdown-editor__toolbar-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 26px;
+  height: 28px;
   padding: 0 8px;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-muted);
   transition: background 0.12s, color 0.12s;
@@ -1114,13 +1125,12 @@
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--primary);
   transition: background 0.12s, color 0.12s;
   white-space: nowrap;
   font-family: inherit;
-  margin-left: auto;
 }
 
 .markdown-editor__copy-btn:hover {
@@ -1144,7 +1154,7 @@
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--primary);
   transition: background 0.12s, color 0.12s;
@@ -1169,6 +1179,16 @@
   background: rgba(220, 38, 38, 0.08);
 }
 
+/* Row 4 — Footer: copy + send buttons, right-aligned */
+.markdown-editor__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 6px 8px;
+  flex-shrink: 0;
+}
+
 .markdown-editor__textarea {
   flex: 1;
   width: 100%;
@@ -1179,7 +1199,7 @@
   background: var(--bg);
   color: var(--text);
   font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Consolas, 'Courier New', monospace;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
   tab-size: 2;
 }

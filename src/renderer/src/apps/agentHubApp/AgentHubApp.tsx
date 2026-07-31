@@ -4,6 +4,7 @@ import SessionSidebar from '../../components/AgentHub/SessionSidebar'
 import NewSessionDialog from '../../components/AgentHub/NewSessionDialog'
 import SessionHistoryDialog from '../../components/AgentHub/SessionHistoryDialog'
 import MarkdownEditor from '../../components/AgentHub/MarkdownEditor'
+import type { MarkdownHandle } from '../../components/AgentHub/MarkdownEditor'
 import TerminalView from '../../components/AgentHub/TerminalView'
 import type { TerminalHandle } from '../../components/AgentHub/TerminalView'
 import type { AgentSession, AgentDescriptor, AgentHubData, SessionHistoryEntry } from '@shared/agentHub'
@@ -104,6 +105,9 @@ export default function AgentHubApp(): JSX.Element {
   // The terminal stays mounted per session (v1.14.x PTY-persistence pattern).
   const terminalRefs = useRef(new Map<string, TerminalHandle>())
 
+  // Markdown editor handles, keyed by session id (for history re-edit).
+  const markdownRefs = useRef(new Map<string, MarkdownHandle>())
+
   // Counter-based persistence flag
   const pendingSaveRef = useRef(0)
 
@@ -203,6 +207,11 @@ export default function AgentHubApp(): JSX.Element {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
 
+  // Session whose history dialog is open (derived non-null for the dialog props)
+  const historySession = historySessionId
+    ? (sessions.find((s) => s.id === historySessionId) ?? null)
+    : null
+
   // ── Handlers ──────────────────────────────────────────────────────────
 
   const handleOpenNewSession = useCallback((): void => {
@@ -250,6 +259,8 @@ export default function AgentHubApp(): JSX.Element {
     }
     setSessions((prev) => prev.filter((s) => s.id !== id))
     setActiveSessionId((prev) => (prev === id ? null : prev))
+    // Drop the session's markdown editor handle
+    markdownRefs.current.delete(id)
     // Drop the session's question history too
     setHistories((prev) => {
       const next = { ...prev }
@@ -295,19 +306,18 @@ export default function AgentHubApp(): JSX.Element {
     [recordHistory]
   )
 
-  // Re-inject a history entry into that specific session's terminal.
-  const handleSendAgain = useCallback(
-    (sessionId: string, content: string): boolean => {
-      return handleSendToSession(sessionId, content)
-    },
-    [handleSendToSession]
-  )
-
   const handleOpenHistory = useCallback((id: string): void => {
     setHistorySessionId(id)
   }, [])
 
   const handleCloseHistory = useCallback((): void => {
+    setHistorySessionId(null)
+  }, [])
+
+  // Load a history entry back into that session's markdown editor for editing,
+  // then close the dialog. The editor handle expands the panel if it was collapsed.
+  const handleReEdit = useCallback((sessionId: string, content: string): void => {
+    markdownRefs.current.get(sessionId)?.setContent(content)
     setHistorySessionId(null)
   }, [])
 
@@ -395,7 +405,6 @@ export default function AgentHubApp(): JSX.Element {
         onNew={handleOpenNewSession}
         onDelete={handleDeleteSession}
         onRename={handleRenameSession}
-        onHistory={handleOpenHistory}
         collapsed={sidebarCollapsed}
         width={sidebarWidth}
         onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
@@ -434,6 +443,14 @@ export default function AgentHubApp(): JSX.Element {
                       <MarkdownEditor
                         width={mdWidth}
                         onResize={(w) => setMdWidth(w)}
+                        onOpenHistory={() => handleOpenHistory(s.id)}
+                        ref={(handle) => {
+                          if (handle) {
+                            markdownRefs.current.set(s.id, handle)
+                          } else {
+                            markdownRefs.current.delete(s.id)
+                          }
+                        }}
                         onSend={(content) => handleSendToSession(s.id, content)}
                       />
                       {s.workDir ? (
@@ -442,6 +459,7 @@ export default function AgentHubApp(): JSX.Element {
                             sessionId={s.id}
                             command={agent?.command ?? s.agentId}
                             workDir={s.workDir}
+                            active={isActive}
                             ref={(handle) => {
                               if (handle) {
                                 terminalRefs.current.set(s.id, handle)
@@ -488,15 +506,12 @@ export default function AgentHubApp(): JSX.Element {
       )}
 
       {/* Session question history dialog */}
-      {historySessionId && (
+      {historySession && (
         <SessionHistoryDialog
-          session={sessions.find((s) => s.id === historySessionId) ?? null}
-          entries={histories[historySessionId] ?? []}
+          session={historySession}
+          entries={histories[historySession.id] ?? []}
           onClose={handleCloseHistory}
-          onCopy={(content) => {
-            navigator.clipboard.writeText(content).catch(() => {})
-          }}
-          onSendAgain={handleSendAgain}
+          onReEdit={(entry) => handleReEdit(historySession.id, entry.content)}
         />
       )}
     </div>

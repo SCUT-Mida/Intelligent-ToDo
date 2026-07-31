@@ -7,16 +7,15 @@ interface SessionHistoryDialogProps {
   /** This session's history entries (newest last). */
   entries: SessionHistoryEntry[]
   onClose: () => void
-  /** Copy entry content to clipboard. */
-  onCopy: (content: string) => void
-  /** Re-inject an entry into that session's terminal. Returns success. */
-  onSendAgain: (sessionId: string, content: string) => boolean
+  /** Load an entry back into that session's markdown editor for editing. */
+  onReEdit: (entry: SessionHistoryEntry) => void
 }
 
 /**
  * Modal dialog listing a session's pasted/sent question history.
  *
- * Renders newest-first cards (timestamp + source badge + content + actions).
+ * Renders newest-first cards (timestamp + source badge + content + a single
+ * "重新编辑" action that loads the entry back into the markdown editor).
  * Esc closes the dialog; clicking the overlay (not the box) also closes it.
  * Follows the `.new-session-dialog` overlay pattern with a light theme.
  */
@@ -24,8 +23,7 @@ export default function SessionHistoryDialog({
   session,
   entries,
   onClose,
-  onCopy,
-  onSendAgain
+  onReEdit
 }: SessionHistoryDialogProps): JSX.Element | null {
   // Close on Escape
   useEffect(() => {
@@ -40,13 +38,6 @@ export default function SessionHistoryDialog({
 
   if (session === null) {
     return null
-  }
-
-  const handleSendAgain = (entry: SessionHistoryEntry): void => {
-    const ok = onSendAgain(session.id, entry.content)
-    if (!ok) {
-      window.alert('该会话终端未就绪，请稍后再试')
-    }
   }
 
   // Newest first — render in reverse without mutating the original array
@@ -91,16 +82,12 @@ export default function SessionHistoryDialog({
                 <pre className="session-history-dialog__content">{entry.content}</pre>
                 <div className="session-history-dialog__entry-actions">
                   <button
-                    className="btn btn--ghost session-history-dialog__action-btn"
-                    onClick={() => onCopy(entry.content)}
+                    type="button"
+                    className="session-history-dialog__reedit-btn"
+                    onClick={() => onReEdit(entry)}
+                    title="把这条内容载入 Markdown 编辑器"
                   >
-                    复制
-                  </button>
-                  <button
-                    className="btn btn--ghost session-history-dialog__action-btn"
-                    onClick={() => handleSendAgain(entry)}
-                  >
-                    再次发送
+                    ✏️ 重新编辑
                   </button>
                 </div>
               </div>

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 
 interface MarkdownEditorProps {
   /** Send markdown content into the active terminal. Returns success. */
@@ -7,6 +7,13 @@ interface MarkdownEditorProps {
   width: number
   /** Called while the user drags the editor's right-edge resizer. */
   onResize?: (w: number) => void
+  /** Called when the user clicks the history button in the navbar. */
+  onOpenHistory?: () => void
+}
+
+export interface MarkdownHandle {
+  /** Replace the editor content and expand the panel (used by history re-edit). */
+  setContent: (text: string) => void
 }
 
 /**
@@ -41,14 +48,21 @@ function startResizeDrag(
 /**
  * Collapsible Markdown editor panel with formatting helpers.
  *
- * Renders a toggle button in a header bar. When expanded, shows a textarea
- * with formatting shortcut buttons (bold, code, codeblock, list, numbered list)
- * and a "复制 Markdown" copy-to-clipboard button.
+ * Expanded layout is 4 rows:
+ *   1. Navbar — collapse toggle (left) + history button (right)
+ *   2. Toolbar — markdown formatting shortcuts
+ *   3. Editor — the textarea
+ *   4. Footer — copy + send-to-terminal buttons
+ * Collapsed: a narrow vertical strip showing only the toggle button.
  *
- * Collapsed by default. When expanded, its width is controlled by the parent's
- * shared layout state and can be adjusted with the right-edge resizer.
+ * The width is controlled by the parent's shared layout state and can be
+ * adjusted with the right-edge resizer. Exposes an imperative handle
+ * (MarkdownHandle.setContent) for loading a history entry back into the editor.
  */
-export default function MarkdownEditor({ onSend, width, onResize }: MarkdownEditorProps): JSX.Element {
+const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function MarkdownEditor(
+  { onSend, width, onResize, onOpenHistory }: MarkdownEditorProps,
+  ref
+): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const [content, setContent] = useState('')
   const [copied, setCopied] = useState(false)
@@ -56,6 +70,19 @@ export default function MarkdownEditor({ onSend, width, onResize }: MarkdownEdit
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sentTimerRef = useRef<number | null>(null)
   const copiedTimerRef = useRef<number | null>(null)
+
+  // Imperative handle: loading a history entry replaces the content AND expands
+  // the panel so the loaded text is immediately visible.
+  useImperativeHandle(
+    ref,
+    () => ({
+      setContent: (text: string): void => {
+        setContent(text)
+        setExpanded(true)
+      }
+    }),
+    []
+  )
 
   // Clear any pending feedback timers on unmount
   useEffect(() => {
@@ -244,37 +271,62 @@ export default function MarkdownEditor({ onSend, width, onResize }: MarkdownEdit
       className={`markdown-editor ${expanded ? 'markdown-editor--expanded' : 'markdown-editor--collapsed'}`}
       style={{ width: expanded ? width : 32 }}
     >
-      <div className="markdown-editor__header">
-        <button
-          className="markdown-editor__toggle"
-          onClick={handleToggle}
-          title={expanded ? '收起 Markdown' : '打开 Markdown 编辑器'}
-        >
+      {/* Row 1 — Navbar: collapse toggle (left) + history button (right) */}
+      <div className="markdown-editor__navbar">
+        <button type="button" className="markdown-editor__toggle" onClick={handleToggle} title="展开/收起">
           📝
         </button>
-
         {expanded && (
+          <button
+            type="button"
+            className="markdown-editor__history-btn"
+            onClick={onOpenHistory}
+            title="查看该会话的提问历史"
+          >
+            📜 历史
+          </button>
+        )}
+      </div>
+
+      {expanded && (
+        <>
+          {/* Row 2 — Toolbar: markdown formatting shortcuts only */}
           <div className="markdown-editor__toolbar">
-            <button className="markdown-editor__toolbar-btn" onClick={handleBold} title="加粗">
+            <button type="button" className="markdown-editor__toolbar-btn" onClick={handleBold} title="加粗">
               <strong>B</strong>
             </button>
-            <button className="markdown-editor__toolbar-btn" onClick={handleInlineCode} title="行内代码">
+            <button type="button" className="markdown-editor__toolbar-btn" onClick={handleInlineCode} title="行内代码">
               {'</>'}
             </button>
-            <button className="markdown-editor__toolbar-btn" onClick={handleCodeblock} title="代码块">
+            <button type="button" className="markdown-editor__toolbar-btn" onClick={handleCodeblock} title="代码块">
               {'```'}
             </button>
 
             <div className="markdown-editor__toolbar-sep" />
 
-            <button className="markdown-editor__toolbar-btn" onClick={handleUnorderedList} title="无序列表">
+            <button type="button" className="markdown-editor__toolbar-btn" onClick={handleUnorderedList} title="无序列表">
               —
             </button>
-            <button className="markdown-editor__toolbar-btn" onClick={handleOrderedList} title="有序列表">
+            <button type="button" className="markdown-editor__toolbar-btn" onClick={handleOrderedList} title="有序列表">
               1.
             </button>
+          </div>
 
+          {/* Row 3 — Editor */}
+          <textarea
+            ref={textareaRef}
+            className="markdown-editor__textarea"
+            value={content}
+            onChange={handleTextareaChange}
+            onKeyDown={handleTextareaKeyDown}
+            placeholder="在此编写 Markdown…"
+            spellCheck={false}
+          />
+
+          {/* Row 4 — Footer: copy + send-to-terminal */}
+          <div className="markdown-editor__footer">
             <button
+              type="button"
               className={`markdown-editor__copy-btn ${copied ? 'markdown-editor__copy-btn--copied' : ''}`}
               onClick={handleCopy}
               title="复制 Markdown 内容到剪贴板"
@@ -283,6 +335,7 @@ export default function MarkdownEditor({ onSend, width, onResize }: MarkdownEdit
             </button>
 
             <button
+              type="button"
               className={`markdown-editor__send-btn ${
                 sentState === 'sent'
                   ? 'markdown-editor__send-btn--sent'
@@ -296,19 +349,7 @@ export default function MarkdownEditor({ onSend, width, onResize }: MarkdownEdit
               {sentState === 'sent' ? '✓ 已发送' : sentState === 'failed' ? '发送失败' : '发送到终端'}
             </button>
           </div>
-        )}
-      </div>
-
-      {expanded && (
-        <textarea
-          ref={textareaRef}
-          className="markdown-editor__textarea"
-          value={content}
-          onChange={handleTextareaChange}
-          onKeyDown={handleTextareaKeyDown}
-          placeholder="在此编写 Markdown…"
-          spellCheck={false}
-        />
+        </>
       )}
 
       {expanded && onResize && (
@@ -320,4 +361,6 @@ export default function MarkdownEditor({ onSend, width, onResize }: MarkdownEdit
       )}
     </div>
   )
-}
+})
+
+export default MarkdownEditor
