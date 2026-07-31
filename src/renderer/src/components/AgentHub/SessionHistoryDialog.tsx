@@ -1,5 +1,93 @@
-import { useEffect } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentSession, SessionHistoryEntry } from '@shared/agentHub'
+
+interface HistoryEntryProps {
+  entry: SessionHistoryEntry
+  onReEdit: (entry: SessionHistoryEntry) => void
+}
+
+/**
+ * A single question-history card: meta row + content pre + actions.
+ *
+ * Long content is collapsed to 3 lines by default (via -webkit-line-clamp);
+ * when it actually overflows, an 展开/收起 toggle is shown. Overflow is
+ * detected by temporarily un-clamping the pre to measure its full height —
+ * reading scrollHeight directly on a clamped element returns the clamped
+ * height, so that naive check would never detect overflow.
+ */
+function HistoryEntry({ entry, onReEdit }: HistoryEntryProps): JSX.Element {
+  const preRef = useRef<HTMLPreElement>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [overflowing, setOverflowing] = useState(false)
+
+  // Measure the real content height with the clamp removed, then restore.
+  // Re-runs whenever content changes (e.g. the dialog re-opens with new data).
+  useLayoutEffect(() => {
+    const el = preRef.current
+    if (!el) return
+    // Force the clamp inline so measurement is independent of the current
+    // expanded/collapsed class state (prevents a stale full-height clientHeight
+    // when the entry was already expanded before the content changed).
+    const prevDisplay = el.style.display
+    const prevClamp = el.style.webkitLineClamp
+    const prevMaxHeight = el.style.maxHeight
+    el.style.display = '-webkit-box'
+    el.style.webkitLineClamp = '3'
+    el.style.maxHeight = 'none'
+    const clampedHeight = el.clientHeight
+    el.style.webkitLineClamp = 'unset'
+    const fullHeight = el.scrollHeight
+    el.style.display = prevDisplay
+    el.style.webkitLineClamp = prevClamp
+    el.style.maxHeight = prevMaxHeight
+    setOverflowing(fullHeight > clampedHeight + 1)
+    setExpanded(false)
+  }, [entry.content])
+
+  const collapsed = !expanded && overflowing
+
+  return (
+    <div className="session-history-dialog__entry">
+      <div className="session-history-dialog__entry-meta">
+        <span className="session-history-dialog__time">
+          {new Date(entry.at).toLocaleString('zh-CN', { hour12: false })}
+        </span>
+        <span
+          className={`session-history-dialog__badge session-history-dialog__badge--${entry.source}`}
+        >
+          {entry.source === 'markdown' ? 'Markdown 发送' : '终端粘贴'}
+        </span>
+      </div>
+      <pre
+        ref={preRef}
+        className={`session-history-dialog__content${
+          collapsed ? ' session-history-dialog__content--collapsed' : ''
+        }`}
+      >
+        {entry.content}
+      </pre>
+      <div className="session-history-dialog__entry-actions">
+        {overflowing && (
+          <button
+            type="button"
+            className="session-history-dialog__expand-btn"
+            onClick={() => setExpanded((prev) => !prev)}
+          >
+            {expanded ? '收起' : '展开'}
+          </button>
+        )}
+        <button
+          type="button"
+          className="session-history-dialog__reedit-btn"
+          onClick={() => onReEdit(entry)}
+          title="把这条内容载入 Markdown 编辑器"
+        >
+          ✏️ 重新编辑
+        </button>
+      </div>
+    </div>
+  )
+}
 
 interface SessionHistoryDialogProps {
   /** Session whose history is shown (null while closing). */
@@ -68,29 +156,7 @@ export default function SessionHistoryDialog({
         ) : (
           <div className="session-history-dialog__list">
             {newestFirst.map((entry) => (
-              <div key={entry.id} className="session-history-dialog__entry">
-                <div className="session-history-dialog__entry-meta">
-                  <span className="session-history-dialog__time">
-                    {new Date(entry.at).toLocaleString('zh-CN', { hour12: false })}
-                  </span>
-                  <span
-                    className={`session-history-dialog__badge session-history-dialog__badge--${entry.source}`}
-                  >
-                    {entry.source === 'markdown' ? 'Markdown 发送' : '终端粘贴'}
-                  </span>
-                </div>
-                <pre className="session-history-dialog__content">{entry.content}</pre>
-                <div className="session-history-dialog__entry-actions">
-                  <button
-                    type="button"
-                    className="session-history-dialog__reedit-btn"
-                    onClick={() => onReEdit(entry)}
-                    title="把这条内容载入 Markdown 编辑器"
-                  >
-                    ✏️ 重新编辑
-                  </button>
-                </div>
-              </div>
+              <HistoryEntry key={entry.id} entry={entry} onReEdit={onReEdit} />
             ))}
           </div>
         )}

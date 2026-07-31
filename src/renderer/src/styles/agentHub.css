@@ -954,10 +954,42 @@
   font-family: inherit;
 }
 
+/* Collapsed: clamp long content to 3 lines with an ellipsis. Must coexist
+   with white-space: pre-wrap / word-break on the base rule above. */
+.session-history-dialog__content--collapsed {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
 .session-history-dialog__entry-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* Ghost toggle — secondary to the 重新编辑 button, sits left via auto margin. */
+.session-history-dialog__expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-faint);
+  font-family: inherit;
+  margin-right: auto;
+  transition: color 0.12s, background 0.12s;
+}
+
+.session-history-dialog__expand-btn:hover {
+  color: var(--primary);
+  background: var(--primary-soft);
 }
 
 .session-history-dialog__reedit-btn {
