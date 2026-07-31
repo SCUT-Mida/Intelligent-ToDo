@@ -137,6 +137,8 @@ const agentHub = {
   /** Kill a PTY process. */
   killTerminal: (sessionId: string): Promise<void> =>
     ipcRenderer.invoke(AGENT_IPC.PTY_KILL, sessionId),
+  /** Read clipboard text from the main process (bypasses renderer clipboard quirks). */
+  readClipboard: (): Promise<string> => ipcRenderer.invoke(AGENT_IPC.CLIPBOARD_READ),
 
   // ── PTY event subscriptions (each returns an unsubscribe function) ──
   /** Subscribe to PTY output data. */

@@ -45,7 +45,9 @@ export const AGENT_IPC = {
    /** Resize a PTY. */
    PTY_RESIZE: 'agentHub:pty:resize',
    /** Kill a PTY process. */
-   PTY_KILL: 'agentHub:pty:kill'
+   PTY_KILL: 'agentHub:pty:kill',
+   /** Read clipboard text from the main process (reliable paste into PTY). */
+   CLIPBOARD_READ: 'agentHub:clipboardRead'
  } as const
 
  // ── PTY push event channels (main → renderer) ──────────────────────────────

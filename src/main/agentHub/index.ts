@@ -6,7 +6,7 @@
  * workDir with the agent command running. Reuses repoNav's launcher.
  */
 
-import { ipcMain, dialog, BrowserWindow, app } from 'electron'
+import { ipcMain, dialog, BrowserWindow, app, clipboard } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import { execFileSync } from 'child_process'
 import { readFileSync, existsSync } from 'fs'
@@ -111,6 +111,13 @@ export function registerAgentHubIpc(ipc: typeof ipcMain): void {
   ipc.handle(AGENT_IPC.PTY_KILL, (_e, sessionId: string) => {
     killPty(sessionId)
   })
+
+  // CLIPBOARD_READ: read clipboard text in the MAIN process. This bypasses a
+  // known Electron/Chromium quirk where clipboards written via the async
+  // navigator.clipboard.writeText() API surface as EMPTY event.clipboardData
+  // on a subsequent paste event in the renderer — which made xterm.js silently
+  // drop pasted text. electron.clipboard.readText() always reads the OS clipboard.
+  ipc.handle(AGENT_IPC.CLIPBOARD_READ, (): string => clipboard.readText())
 
   logger.info('agentHub:ipc', 'IPC handlers registered')
 }

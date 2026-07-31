@@ -114,11 +114,42 @@ export default function TerminalView({ sessionId, command, workDir, onExit }: Te
     })
     resizeObserver.observe(containerRef.current)
 
+    // ── Paste: bypass xterm's native (clipboardData-dependent) handling ──
+    // Known Electron quirk: clipboards written via navigator.clipboard.writeText()
+    // (async API) can surface as EMPTY event.clipboardData on a subsequent paste,
+    // so xterm's built-in paste handler silently drops the text. We intercept the
+    // paste in the CAPTURE phase (runs before xterm's target-phase listener),
+    // prevent the default insertion, and read the clipboard from the MAIN process
+    // (electron.clipboard.readText()) which is always reliable.
+    const container = containerRef.current
+    const onPasteCapture = (e: ClipboardEvent): void => {
+      e.preventDefault()
+      e.stopPropagation()
+
+      const clipText = e.clipboardData?.getData('text/plain') ?? ''
+      if (clipText) {
+        // clipboardData has the text — send it straight to the PTY (no IPC round-trip)
+        window.agentHub.sendInput(sessionId, clipText)
+      } else {
+        // clipboardData empty (Electron async-clipboard quirk) → read via main process
+        window.agentHub
+          .readClipboard()
+          .then((text) => {
+            if (text && terminalRef.current) window.agentHub.sendInput(sessionId, text)
+          })
+          .catch((err: unknown) => {
+            console.error('[TerminalView] readClipboard failed', err)
+          })
+      }
+    }
+    container.addEventListener('paste', onPasteCapture, true)
+
     // ── Focus terminal for immediate interaction ──
     term.focus()
 
     // ── Cleanup on unmount ──
     return () => {
+      container.removeEventListener('paste', onPasteCapture, true)
       resizeObserver.disconnect()
       resizeDisposable.dispose()
       dataDisposable.dispose()
