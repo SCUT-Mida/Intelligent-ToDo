@@ -48,6 +48,11 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
   const onPastedRef = useRef(onPasted)
   onPastedRef.current = onPasted
 
+  // Timestamp of the last keyboard-initiated paste (Ctrl/Cmd+V). Used to skip a
+  // DOM 'paste' event that may still fire right after the keydown handler above
+  // performed the paste (double-paste guard).
+  const lastPasteRef = useRef(0)
+
   useImperativeHandle(
     ref,
     () => ({
@@ -155,7 +160,37 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
     // markers, a multi-line paste would be executed line-by-line as if typed.
     // term.paste() then fires onData, which the handler above forwards to the PTY.
     const container = containerRef.current
+
+    // Keyboard-initiated paste (Ctrl/Cmd+V): the default Electron menu is removed,
+    // so the keydown reaches the renderer. We intercept it in the CAPTURE phase
+    // (runs before xterm's own listeners), prevent the default insertion, and read
+    // the clipboard from the MAIN process (electron.clipboard.readText()) which is
+    // always reliable — this also covers the async-clipboard empty-clipboardData quirk.
+    // The text is injected via term.paste() so line endings and bracketed-paste
+    // markers are handled identically to the 'paste' event path below.
+    const onKeyDownCapture = (e: KeyboardEvent): void => {
+      const isPasteChord = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'v'
+      if (!isPasteChord) return
+      e.preventDefault()
+      e.stopPropagation()
+      lastPasteRef.current = Date.now()
+      window.agentHub
+        .readClipboard()
+        .then((text) => {
+          if (text && terminalRef.current) {
+            terminalRef.current.paste(text)
+            onPastedRef.current?.(text)
+          }
+        })
+        .catch((err: unknown) => {
+          console.error('[TerminalView] readClipboard failed', err)
+        })
+    }
+
     const onPasteCapture = (e: ClipboardEvent): void => {
+      // The keydown handler above already performed the paste — skip the DOM
+      // 'paste' event if it still fires right after (double-paste guard).
+      if (Date.now() - lastPasteRef.current < 500) return
       e.preventDefault()
       e.stopPropagation()
 
@@ -180,6 +215,7 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
       }
     }
     container.addEventListener('paste', onPasteCapture, true)
+    container.addEventListener('keydown', onKeyDownCapture, true)
 
     // ── Focus terminal for immediate interaction ──
     term.focus()
@@ -187,6 +223,7 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
     // ── Cleanup on unmount ──
     return () => {
       container.removeEventListener('paste', onPasteCapture, true)
+      container.removeEventListener('keydown', onKeyDownCapture, true)
       resizeObserver.disconnect()
       resizeDisposable.dispose()
       dataDisposable.dispose()

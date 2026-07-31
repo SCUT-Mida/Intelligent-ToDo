@@ -139,6 +139,8 @@ const agentHub = {
     ipcRenderer.invoke(AGENT_IPC.PTY_KILL, sessionId),
   /** Read clipboard text from the main process (bypasses renderer clipboard quirks). */
   readClipboard: (): Promise<string> => ipcRenderer.invoke(AGENT_IPC.CLIPBOARD_READ),
+  /** Write text to the OS clipboard via the main process (always reliable). */
+  writeClipboard: (text: string): Promise<void> => ipcRenderer.invoke(AGENT_IPC.CLIPBOARD_WRITE, text),
 
   // ── PTY event subscriptions (each returns an unsubscribe function) ──
   /** Subscribe to PTY output data. */

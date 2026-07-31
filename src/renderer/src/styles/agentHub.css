@@ -14,13 +14,13 @@
 }
 
 .agent-hub__sidebar {
-  width: 260px;
-  min-width: 260px;
   display: flex;
   flex-direction: column;
   background: var(--surface);
   border-right: 1px solid var(--border);
   overflow: hidden;
+  flex-shrink: 0;
+  position: relative;
 }
 
 .agent-hub__main {
@@ -29,6 +29,69 @@
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+}
+
+/* ── Sidebar collapse strip & column resizers ──────────────────────────── */
+
+.agent-hub__sidebar--collapsed {
+  align-items: stretch;
+}
+
+.agent-hub__sidebar-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.agent-hub__sidebar-toggle,
+.agent-hub__sidebar-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
+}
+
+.agent-hub__sidebar-toggle:hover,
+.agent-hub__sidebar-collapse:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.agent-hub__sidebar-title-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Column resizers — sit flush inside the parent's right edge (parents clip
+   overflow, so right: 0 instead of -3px keeps the full grab area usable). */
+.agent-hub__sidebar-resizer,
+.markdown-editor__resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 5;
+  transition: background 0.12s;
+}
+
+.agent-hub__sidebar-resizer:hover,
+.markdown-editor__resizer:hover {
+  background: rgba(94, 129, 244, 0.25);
 }
 
 /* ── Error banner ───────────────────────────────────────────────────────── */
@@ -945,15 +1008,31 @@
 .markdown-editor {
   display: flex;
   flex-direction: column;
-  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   background: var(--surface);
   overflow: hidden;
   flex-shrink: 0;
+  position: relative;
 }
 
 .markdown-editor--expanded {
-  flex: 0 0 30%;
-  min-height: 120px;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Collapsed: 32px vertical strip showing only the toggle button. */
+.markdown-editor--collapsed {
+  align-items: stretch;
+}
+
+.markdown-editor--collapsed .markdown-editor__header {
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 6px 0;
+  min-height: 0;
 }
 
 .markdown-editor__toggle {
@@ -989,6 +1068,7 @@
 .markdown-editor__toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
   flex: 1;
 }
@@ -1108,12 +1188,13 @@
   color: var(--text-faint);
 }
 
-/* ── Terminal wrapper (hosts markdown-editor + terminal) ──────────────────── */
+/* ── Terminal wrapper (hosts markdown-editor + terminal side by side) ─────── */
 
 .agent-hub__terminal-wrapper {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: #1e1e2e;
@@ -1123,6 +1204,7 @@
 .agent-hub__terminal-stack {
   flex: 1;
   position: relative;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -1130,7 +1212,8 @@
 .agent-hub__terminal-panel {
   position: absolute;
   inset: 0;
-  flex-direction: column;
+  flex-direction: row;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -1138,6 +1221,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   position: relative;
@@ -1174,6 +1258,7 @@
   justify-content: center;
   gap: 12px;
   background: var(--surface);
+  min-width: 0;
 }
 
 .agent-hub__workdir-prompt-icon {

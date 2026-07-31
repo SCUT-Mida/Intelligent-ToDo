@@ -751,6 +751,16 @@ app.whenReady().then(() => {
     electron: process.versions.electron
   })
 
+  // Remove the default application menu (File/Edit/View) and its accelerators.
+  // CRITICAL for terminal paste: the default menu binds Ctrl+V to the Paste
+  // role, which the MAIN process handles via webContents.paste() — its synthetic
+  // paste event carries an EMPTY clipboardData on Windows, so the embedded
+  // xterm.js silently drops pasted text. With no menu, the Ctrl+V keydown
+  // reaches the renderer natively, where TerminalView intercepts it and reads
+  // the clipboard via the main process instead. Native Ctrl+C/Ctrl+V/Ctrl+A in
+  // text inputs still work (Chromium built-in), and the tray menu is unaffected.
+  Menu.setApplicationMenu(null)
+
   // Register repo-navigator IPC handlers (before data handlers — ordering
   // doesn't matter for IPC, but grouping them together reads well).
   registerRepoNavIpc(ipcMain)

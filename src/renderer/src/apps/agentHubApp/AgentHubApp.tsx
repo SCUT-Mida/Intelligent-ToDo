@@ -16,6 +16,36 @@ interface RepoEntry {
 }
 
 /**
+ * Shared column-resize helper. Attaches mousemove/mouseup listeners on window
+ * for the duration of the drag and reports the new width through onWidth.
+ * Used for both the session sidebar and the markdown editor columns.
+ */
+function startResizeDrag(
+  e: React.MouseEvent,
+  startWidth: number,
+  min: number,
+  max: number,
+  onWidth: (w: number) => void
+): void {
+  e.preventDefault()
+  const startX = e.clientX
+  const onMove = (ev: MouseEvent): void => {
+    const next = Math.min(max, Math.max(min, startWidth + (ev.clientX - startX)))
+    onWidth(next)
+  }
+  const onUp = (): void => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
+/**
  * Root component for the Agent Hub sub-app.
  *
  * A session manager + terminal launcher. Users create sessions via a dialog
@@ -35,6 +65,11 @@ export default function AgentHubApp(): JSX.Element {
   const [selectedAgentId, setSelectedAgentId] = useState<string>('claude')
   const [repos, setRepos] = useState<RepoEntry[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Left-right column layout: sidebar width + collapse, shared markdown-editor width.
+  const [sidebarWidth, setSidebarWidth] = useState(220)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [mdWidth, setMdWidth] = useState(300)
 
   // Per-session question history (keyed by session id, newest last)
   const [histories, setHistories] = useState<Record<string, SessionHistoryEntry[]>>({})
@@ -361,6 +396,10 @@ export default function AgentHubApp(): JSX.Element {
         onDelete={handleDeleteSession}
         onRename={handleRenameSession}
         onHistory={handleOpenHistory}
+        collapsed={sidebarCollapsed}
+        width={sidebarWidth}
+        onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+        onResize={(w) => setSidebarWidth(w)}
       />
 
       <div className="agent-hub__main">
@@ -392,7 +431,11 @@ export default function AgentHubApp(): JSX.Element {
                     >
                       {/* Per-session Markdown editor — each panel keeps its own
                           content state (panels stay always-mounted via display:none). */}
-                      <MarkdownEditor onSend={(content) => handleSendToSession(s.id, content)} />
+                      <MarkdownEditor
+                        width={mdWidth}
+                        onResize={(w) => setMdWidth(w)}
+                        onSend={(content) => handleSendToSession(s.id, content)}
+                      />
                       {s.workDir ? (
                         <div className="agent-hub__terminal-area">
                           <TerminalView

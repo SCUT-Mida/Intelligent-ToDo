@@ -3,6 +3,39 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 interface MarkdownEditorProps {
   /** Send markdown content into the active terminal. Returns success. */
   onSend?: (content: string) => boolean
+  /** Expanded editor width in px (shared across sessions, controlled by the parent). */
+  width: number
+  /** Called while the user drags the editor's right-edge resizer. */
+  onResize?: (w: number) => void
+}
+
+/**
+ * Shared column-resize helper. Attaches mousemove/mouseup listeners on window
+ * for the duration of the drag and reports the new width through onWidth.
+ */
+function startResizeDrag(
+  e: React.MouseEvent,
+  startWidth: number,
+  min: number,
+  max: number,
+  onWidth: (w: number) => void
+): void {
+  e.preventDefault()
+  const startX = e.clientX
+  const onMove = (ev: MouseEvent): void => {
+    const next = Math.min(max, Math.max(min, startWidth + (ev.clientX - startX)))
+    onWidth(next)
+  }
+  const onUp = (): void => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
 }
 
 /**
@@ -12,22 +45,26 @@ interface MarkdownEditorProps {
  * with formatting shortcut buttons (bold, code, codeblock, list, numbered list)
  * and a "复制 Markdown" copy-to-clipboard button.
  *
- * Collapsed by default. When expanded, intended to take ~30% of the terminal
- * area height (controlled by the parent's flex layout).
+ * Collapsed by default. When expanded, its width is controlled by the parent's
+ * shared layout state and can be adjusted with the right-edge resizer.
  */
-export default function MarkdownEditor({ onSend }: MarkdownEditorProps): JSX.Element {
+export default function MarkdownEditor({ onSend, width, onResize }: MarkdownEditorProps): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const [content, setContent] = useState('')
   const [copied, setCopied] = useState(false)
   const [sentState, setSentState] = useState<'sent' | 'failed' | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sentTimerRef = useRef<number | null>(null)
+  const copiedTimerRef = useRef<number | null>(null)
 
-  // Clear any pending send-feedback timer on unmount
+  // Clear any pending feedback timers on unmount
   useEffect(() => {
     return () => {
       if (sentTimerRef.current !== null) {
         window.clearTimeout(sentTimerRef.current)
+      }
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current)
       }
     }
   }, [])
@@ -141,13 +178,29 @@ export default function MarkdownEditor({ onSend }: MarkdownEditorProps): JSX.Ele
     }
   }, [content])
 
+  // Copy feedback resets after ~1800ms; a new click clears the pending timer first.
+  const scheduleCopiedReset = useCallback((): void => {
+    if (copiedTimerRef.current !== null) {
+      window.clearTimeout(copiedTimerRef.current)
+    }
+    copiedTimerRef.current = window.setTimeout(() => setCopied(false), 1800)
+  }, [])
+
   const handleCopy = useCallback((): void => {
-    navigator.clipboard.writeText(content).catch((err: unknown) => {
-      console.error('Failed to copy Markdown', err)
-    })
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1800)
-  }, [content])
+    // Prefer the main-process clipboard API (electron.clipboard.writeText) — it is
+    // reliable regardless of renderer focus. Fall back to the async web API, then
+    // show the success feedback only if one of the two actually resolved.
+    window.agentHub
+      .writeClipboard(content)
+      .catch(() => navigator.clipboard.writeText(content)) // fallback
+      .then(() => {
+        setCopied(true)
+        scheduleCopiedReset()
+      })
+      .catch((err: unknown) => {
+        console.error('Failed to copy Markdown', err)
+      })
+  }, [content, scheduleCopiedReset])
 
   // Send feedback resets after ~1800ms; a new click clears the pending timer first.
   const scheduleSentReset = useCallback((): void => {
@@ -187,7 +240,10 @@ export default function MarkdownEditor({ onSend }: MarkdownEditorProps): JSX.Ele
   )
 
   return (
-    <div className={`markdown-editor ${expanded ? 'markdown-editor--expanded' : ''}`}>
+    <div
+      className={`markdown-editor ${expanded ? 'markdown-editor--expanded' : 'markdown-editor--collapsed'}`}
+      style={{ width: expanded ? width : 32 }}
+    >
       <div className="markdown-editor__header">
         <button
           className="markdown-editor__toggle"
@@ -252,6 +308,14 @@ export default function MarkdownEditor({ onSend }: MarkdownEditorProps): JSX.Ele
           onKeyDown={handleTextareaKeyDown}
           placeholder="在此编写 Markdown…"
           spellCheck={false}
+        />
+      )}
+
+      {expanded && onResize && (
+        <div
+          className="markdown-editor__resizer"
+          onMouseDown={(e) => startResizeDrag(e, width, 200, 520, onResize)}
+          title="拖拽调整宽度"
         />
       )}
     </div>

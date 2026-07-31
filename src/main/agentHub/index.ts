@@ -119,5 +119,13 @@ export function registerAgentHubIpc(ipc: typeof ipcMain): void {
   // drop pasted text. electron.clipboard.readText() always reads the OS clipboard.
   ipc.handle(AGENT_IPC.CLIPBOARD_READ, (): string => clipboard.readText())
 
+  // CLIPBOARD_WRITE: write to the OS clipboard from the MAIN process.
+  // Synchronous and always reliable in Electron — used by the Markdown editor's
+  // copy button so the clipboard is guaranteed to contain the text (the renderer's
+  // async navigator.clipboard.writeText() can silently fail on Windows).
+  ipc.handle(AGENT_IPC.CLIPBOARD_WRITE, (_e, text: string): void => {
+    clipboard.writeText(typeof text === 'string' ? text : '')
+  })
+
   logger.info('agentHub:ipc', 'IPC handlers registered')
 }

@@ -10,12 +10,52 @@ interface SessionSidebarProps {
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
   onHistory: (id: string) => void
+  /** Whether the sidebar is collapsed to a narrow strip. */
+  collapsed: boolean
+  /** Expanded sidebar width in px (controlled by the parent). */
+  width: number
+  /** Called when the user clicks the expand/collapse toggle. */
+  onToggleCollapse: () => void
+  /** Called while the user drags the sidebar's right-edge resizer. */
+  onResize: (w: number) => void
+}
+
+/**
+ * Shared column-resize helper. Attaches mousemove/mouseup listeners on window
+ * for the duration of the drag and reports the new width through onWidth.
+ */
+function startResizeDrag(
+  e: React.MouseEvent,
+  startWidth: number,
+  min: number,
+  max: number,
+  onWidth: (w: number) => void
+): void {
+  e.preventDefault()
+  const startX = e.clientX
+  const onMove = (ev: MouseEvent): void => {
+    const next = Math.min(max, Math.max(min, startWidth + (ev.clientX - startX)))
+    onWidth(next)
+  }
+  const onUp = (): void => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
 }
 
 /**
  * Session sidebar — shows a list of saved agent launch sessions.
  * New session button at top, sessions sorted by lastLaunchedAt (recent first),
  * then by createdAt. Supports click-to-select, hover-delete, double-click-rename.
+ *
+ * Collapsible to a narrow strip (expand ☰ + new-session ＋); when expanded the
+ * width is controlled by the parent and adjustable with the right-edge resizer.
  */
 export default function SessionSidebar({
   sessions,
@@ -25,7 +65,11 @@ export default function SessionSidebar({
   onNew,
   onDelete,
   onRename,
-  onHistory
+  onHistory,
+  collapsed,
+  width,
+  onToggleCollapse,
+  onResize
 }: SessionSidebarProps): JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -99,10 +143,31 @@ export default function SessionSidebar({
     return `${months} 个月前`
   }
 
+  // Collapsed: narrow vertical strip with expand toggle + new-session shortcut.
+  if (collapsed) {
+    return (
+      <div className="agent-hub__sidebar agent-hub__sidebar--collapsed" style={{ width: 36 }}>
+        <div className="agent-hub__sidebar-strip">
+          <button className="agent-hub__sidebar-toggle" onClick={onToggleCollapse} title="展开会话列表">
+            ☰
+          </button>
+          <button className="agent-hub__sidebar-toggle" onClick={onNew} title="新建会话">
+            ＋
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="agent-hub__sidebar">
+    <div className="agent-hub__sidebar" style={{ width }}>
       <div className="agent-hub__sidebar-header">
-        <span className="agent-hub__sidebar-title">会话</span>
+        <div className="agent-hub__sidebar-title-group">
+          <span className="agent-hub__sidebar-title">会话</span>
+          <button className="agent-hub__sidebar-collapse" onClick={onToggleCollapse} title="收起侧边栏">
+            «
+          </button>
+        </div>
         <button className="btn btn--primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={onNew}>
           ＋ 新建会话
         </button>
@@ -203,6 +268,11 @@ export default function SessionSidebar({
           })
         )}
       </div>
+      <div
+        className="agent-hub__sidebar-resizer"
+        onMouseDown={(e) => startResizeDrag(e, width, 160, 420, onResize)}
+        title="拖拽调整宽度"
+      />
     </div>
   )
 }
