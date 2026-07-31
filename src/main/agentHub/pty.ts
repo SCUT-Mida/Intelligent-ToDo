@@ -49,50 +49,189 @@ const sessions = new Map<string, PtySession>()
  * output or the user is mid-keystroke (it would corrupt the input line).
  */
 const PROBE_IDLE_MS = 1500
-/** How long to capture the agent's rendered command menu after sending `/`. */
-const PROBE_CAPTURE_MS = 600
+/**
+ * How long to wait after sending `/` for the agent's command menu to fully
+ * render before we start scrolling through it.
+ */
+const PROBE_CAPTURE_MS = 1000
+/**
+ * Wait between scroll keypresses. opencode repaints its menu with incremental
+ * diffs (only changed characters), so each ArrowDown needs a short settle
+ * window or frames get merged and commands are skipped. 150ms was verified to
+ * capture every command while keeping a full scroll pass under ~10 seconds.
+ */
+const PROBE_SCROLL_MS = 150
+/**
+ * Stop scrolling after this many consecutive steps that added no new command.
+ * Must be generous: the first ~10 ArrowDowns only move the highlight within
+ * the visible menu (no new commands), and opencode sometimes pauses repaints
+ * mid-list (a 14-step gap was observed) — but a static/non-scrolling menu
+ * (claude, hermes) will trip this after ~3 seconds.
+ */
+const PROBE_STALL_STEPS = 20
+/** Hard cap on scroll steps so a pathological agent can never hang the probe. */
+const PROBE_MAX_STEPS = 60
+/**
+ * Don't treat "first command reappears on screen" as a wrap-around until we
+ * have scrolled at least this far — the first command is obviously visible on
+ * the initial screen before any scrolling happened.
+ */
+const PROBE_WRAP_MIN_STEPS = 12
 /** Extra wait after sending Escape so the dismissal repaint is also suppressed. */
 const PROBE_DISMISS_MS = 150
 
 /**
- * Strip ANSI/CSI/OSC escape sequences from captured terminal output so the
- * raw text of the rendered menu can be parsed.
+ * ANSI tokenizer for the screen rebuild below. Matches escape sequences as
+ * whole tokens (so cursor-movement CSI codes can be acted on instead of just
+ * stripped) and falls through to individual control/printable characters.
  */
-const ANSI_ESCAPE_RE =
-  /[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g
+const ANSI_TOKEN_RE =
+  /\x1b\[([0-9;?]*)([@-~])|\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b[()][A-Z0-9]|\x1b[=>]|\x1b[@-Z\\-_]|[\x00-\x1f\x7f]|./g
 
 /**
- * Parse the agent's rendered slash-command menu from captured PTY output.
- * Menu items render as `/command  description` (possibly wrapped in box-drawing
- * decorations); we extract every slash token and keep the first description.
+ * Persistent terminal screen buffer.
+ *
+ * opencode renders its command menu with absolute cursor addressing
+ * (CSI row;col H) and then scrolls it with INCREMENTAL DIFF repaints — each
+ * ArrowDown only redraws the changed characters (e.g. it may repaint just
+ * "ommit" while the unchanged "/c" prefix from the previous frame stays on
+ * screen). A naive ANSI-strip + split("\n") collapses every menu item onto
+ * one line (only the first "/command" is found); a one-shot screen rebuild
+ * per frame loses those unchanged prefixes.
+ *
+ * This class models a real terminal: it keeps the character grid across
+ * frames and applies each captured chunk on top of the previous state, so
+ * diff fragments merge correctly and the full menu scroll becomes visible.
  */
-function parseProbedMenu(raw: string): AgentCommandDef[] {
-  const clean = raw
-    .replace(ANSI_ESCAPE_RE, '')
-    .replace(/\r/g, '')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+const SCREEN_ROWS = 48
+const SCREEN_COLS = 240
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.min(Math.max(v, min), max)
+}
+
+class ScreenBuffer {
+  private grid = Array.from({ length: SCREEN_ROWS }, () => Array<string>(SCREEN_COLS).fill(' '))
+  private row = 0
+  private col = 0
+
+  /** Apply a raw chunk of PTY output on top of the current screen state. */
+  apply(raw: string): void {
+    ANSI_TOKEN_RE.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = ANSI_TOKEN_RE.exec(raw)) !== null) {
+      const token = m[0]
+      if (token[0] !== '\x1b') {
+        // Control chars and printable text.
+        if (token === '\r') { this.col = 0; continue }
+        if (token === '\n') { this.row = Math.min(this.row + 1, SCREEN_ROWS - 1); continue }
+        if (token === '\b') { this.col = Math.max(this.col - 1, 0); continue }
+        if (token === '\t') { this.col = Math.min(this.col + 4, SCREEN_COLS - 1); continue }
+        this.grid[this.row][this.col] = token
+        this.col++
+        if (this.col >= SCREEN_COLS) { this.col = 0; this.row = Math.min(this.row + 1, SCREEN_ROWS - 1) }
+        continue
+      }
+
+      // CSI sequence — handle cursor movement / erase; SGR (m) and private
+      // modes (h/l) carry no screen text and are ignored.
+      if (token[1] === '[') {
+        const params = (m[1] ?? '').split(';').map((s) => {
+          const n = parseInt(s, 10)
+          return Number.isFinite(n) ? n : 0
+        })
+        const n1 = params[0] || 1
+        const n2 = params[1] || 1
+        switch (m[2]) {
+          case 'H': case 'f': // cursor position (1-based)
+            this.row = clamp(Math.max(n1, 1) - 1, 0, SCREEN_ROWS - 1)
+            this.col = clamp(Math.max(n2, 1) - 1, 0, SCREEN_COLS - 1)
+            break
+          case 'G': this.col = clamp(Math.max(n1, 1) - 1, 0, SCREEN_COLS - 1); break
+          case 'C': this.col = clamp(this.col + n1, 0, SCREEN_COLS - 1); break
+          case 'D': this.col = clamp(this.col - n1, 0, SCREEN_COLS - 1); break
+          case 'B': this.row = clamp(this.row + n1, 0, SCREEN_ROWS - 1); break
+          case 'A': this.row = clamp(this.row - n1, 0, SCREEN_ROWS - 1); break
+          case 'E': this.row = clamp(this.row + n1, 0, SCREEN_ROWS - 1); this.col = 0; break
+          case 'F': this.row = clamp(this.row - n1, 0, SCREEN_ROWS - 1); this.col = 0; break
+          case 'X': { // erase characters from cursor
+            const n = Math.min(n1, SCREEN_COLS - this.col)
+            for (let i = 0; i < n; i++) this.grid[this.row][this.col + i] = ' '
+            break
+          }
+          case 'K': { // erase in line
+            const mode = params[0] || 0
+            if (mode === 0) for (let i = this.col; i < SCREEN_COLS; i++) this.grid[this.row][i] = ' '
+            else if (mode === 1) for (let i = 0; i <= this.col; i++) this.grid[this.row][i] = ' '
+            else this.grid[this.row].fill(' ')
+            break
+          }
+          case 'J': { // erase in display
+            const mode = params[0] || 0
+            if (mode === 0) {
+              for (let i = this.col; i < SCREEN_COLS; i++) this.grid[this.row][i] = ' '
+              for (let r = this.row + 1; r < SCREEN_ROWS; r++) this.grid[r].fill(' ')
+            } else if (mode === 1) {
+              for (let i = 0; i <= this.col; i++) this.grid[this.row][i] = ' '
+              for (let r = 0; r < this.row; r++) this.grid[r].fill(' ')
+            } else {
+              for (const r of this.grid) r.fill(' ')
+            }
+            break
+          }
+          default: break
+        }
+      }
+      // OSC / other ESC sequences carry no screen text — ignore.
+    }
+  }
+
+  /** Current screen as text rows (right-trimmed). */
+  lines(): string[] {
+    return this.grid.map((cells) => cells.join('').replace(/\s+$/, ''))
+  }
+}
+
+/**
+ * Parse slash-command names out of a rendered menu. Each screen row is
+ * scanned for a `/command` token with a trailing description; the first
+ * command on a row wins and duplicate names are collapsed.
+ */
+function extractCommands(lines: string[]): Map<string, string> {
   const seen = new Map<string, string>()
-  for (const line of clean.split('\n')) {
+  for (const line of lines) {
     const m = line.match(/\/([\w][\w\-/.]*)/)
     if (!m) continue
     const name = m[1].replace(/[.\/]+$/, '')
     if (!name || name.length > 40) continue
     const after = line.slice((m.index ?? 0) + m[0].length)
-    const desc = after.replace(/^[\s:│|┃\-–—>]+/, '').trim().slice(0, 100)
+    const desc = after
+      .replace(/^[\s:│|┃\-–—>]+/, '')
+      .replace(/[│|┃\s]+$/, '')
+      .trim()
+      .slice(0, 100)
     if (!seen.has(name)) seen.set(name, desc)
   }
-  return [...seen.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([name, description]) => ({ name, description }))
+  return seen
+}
+
+/** Names of the commands currently visible on screen. */
+function onScreenCommands(lines: string[]): string[] {
+  return [...extractCommands(lines).keys()]
 }
 
 /**
  * Probe the live terminal for the slash commands the agent actually supports.
  *
- * This is REAL terminal interaction: we send `/` to the running PTY, capture the
- * menu the agent itself renders (ANSI output), then send Escape to dismiss it.
- * Whatever the agent shows in its own TUI is exactly what comes back — no config
- * file mapping needed, works for any agent.
+ * This is REAL terminal interaction: we send `/` to the running PTY, capture
+ * the menu the agent itself renders (ANSI output), scroll through it with
+ * ArrowDown so long menus reveal every command, then send Escape to dismiss.
+ * Whatever the agent shows in its own TUI is exactly what comes back — no
+ * config file mapping needed, works for any agent.
+ *
+ * Why scrolling: opencode's menu has a fixed visible height (~10 rows) but
+ * the full list (built-ins + skills + plugins) is much longer — the first
+ * screen only showed 10 commands while a full scroll pass revealed 40.
  *
  * Guards:
  * - The terminal must be idle (no I/O for PROBE_IDLE_MS) — we never interrupt
@@ -118,24 +257,89 @@ export function probeCommands(sessionId: string): Promise<AgentCommandDef[]> {
       resolve(commands)
     }
 
+    // Persistent screen that accumulates diff repaints across scroll steps.
+    const screen = new ScreenBuffer()
+    const merged = new Map<string, string>()
+    let step = 0
+    let noNewStreak = 0
+    /** First command seen on the initial screen — sentinel for wrap-around. */
+    let firstSeen: string | undefined
+    /** True once `firstSeen` has scrolled off screen (so its return means wrap). */
+    let firstSeenScrolledAway = false
+
+    const drain = (): void => {
+      const chunk = session.captureBuffer ?? ''
+      session.captureBuffer = ''
+      screen.apply(chunk)
+    }
+
+    const mergeVisible = (): number => {
+      const before = merged.size
+      for (const [name, desc] of extractCommands(screen.lines())) {
+        if (!merged.has(name)) merged.set(name, desc)
+      }
+      if (!firstSeen) firstSeen = [...merged.keys()][0]
+      return merged.size - before
+    }
+
+    const isWrapped = (): boolean => {
+      if (!firstSeen || step < PROBE_WRAP_MIN_STEPS) return false
+      const visible = onScreenCommands(screen.lines())
+      if (!visible.includes(firstSeen)) {
+        firstSeenScrolledAway = true
+        return false
+      }
+      // First command is on screen again after having scrolled away → we have
+      // completed a full pass and every command has been visited.
+      return firstSeenScrolledAway
+    }
+
+    const finish = (): void => {
+      try {
+        session.pty.write('\x1b')
+      } catch {
+        /* process may have exited */
+      }
+      // Let the dismissal repaint land before handing back control.
+      setTimeout(() => {
+        drain()
+        settle(commands())
+      }, PROBE_DISMISS_MS)
+    }
+
+    const commands = (): AgentCommandDef[] =>
+      [...merged.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([name, description]) => ({ name, description }))
+
+    const tick = (): void => {
+      if (settled) return
+      drain()
+      const added = mergeVisible()
+      noNewStreak = added > 0 ? 0 : noNewStreak + 1
+
+      if (isWrapped() || noNewStreak >= PROBE_STALL_STEPS || step >= PROBE_MAX_STEPS) {
+        finish()
+        return
+      }
+
+      step++
+      try {
+        session.pty.write('\x1b[B') // ArrowDown — scroll the menu
+      } catch {
+        settle([])
+        return
+      }
+      setTimeout(tick, PROBE_SCROLL_MS)
+    }
+
     try {
       session.pty.write('/')
     } catch {
       settle([])
       return
     }
-
-    // After the capture window, dismiss the menu with Escape, wait for the
-    // repaint to settle, then hand back the parsed commands.
-    setTimeout(() => {
-      try {
-        session.pty.write('\x1b')
-      } catch {
-        /* process may have exited */
-      }
-      const captured = session.captureBuffer ?? ''
-      setTimeout(() => settle(parseProbedMenu(captured)), PROBE_DISMISS_MS)
-    }, PROBE_CAPTURE_MS)
+    setTimeout(tick, PROBE_CAPTURE_MS)
   })
 }
 
