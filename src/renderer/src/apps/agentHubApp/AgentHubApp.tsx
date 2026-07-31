@@ -7,7 +7,7 @@ import MarkdownEditor from '../../components/AgentHub/MarkdownEditor'
 import type { MarkdownHandle } from '../../components/AgentHub/MarkdownEditor'
 import TerminalView from '../../components/AgentHub/TerminalView'
 import type { TerminalHandle } from '../../components/AgentHub/TerminalView'
-import type { AgentSession, AgentDescriptor, AgentHubData, SessionHistoryEntry } from '@shared/agentHub'
+import type { AgentSession, AgentDescriptor, AgentHubData, SessionHistoryEntry, AgentCommandDef } from '@shared/agentHub'
 import { createDefaultAgentHubData } from '@shared/agentHub'
 import '../../styles/agentHub.css'
 
@@ -76,11 +76,12 @@ export default function AgentHubApp(): JSX.Element {
   const [histories, setHistories] = useState<Record<string, SessionHistoryEntry[]>>({})
   // Session whose history dialog is currently open (null = closed)
   const [historySessionId, setHistorySessionId] = useState<string | null>(null)
+  // Slash commands per session (live-probed from each session's terminal)
+  const [sessionCommands, setSessionCommands] = useState<Record<string, AgentCommandDef[]>>({})
 
   // Dialog state
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false)
   const [pendingWorkDir, setPendingWorkDir] = useState<string | null>(null)
-  const [defaultAgentId, setDefaultAgentId] = useState<string | undefined>(undefined)
 
   // Refs to always have access to latest values in callbacks
   const selectedAgentIdRef = useRef(selectedAgentId)
@@ -91,12 +92,6 @@ export default function AgentHubApp(): JSX.Element {
 
   const historiesRef = useRef(histories)
   historiesRef.current = histories
-
-  const agentsRef = useRef(agents)
-  agentsRef.current = agents
-
-  const defaultAgentIdRef = useRef(defaultAgentId)
-  defaultAgentIdRef.current = defaultAgentId
 
   const activeSessionIdRef = useRef(activeSessionId)
   activeSessionIdRef.current = activeSessionId
@@ -120,7 +115,6 @@ export default function AgentHubApp(): JSX.Element {
         sessions,
         histories: historiesRef.current,
         lastAgentId: selectedAgentIdRef.current,
-        defaultAgentId: defaultAgentIdRef.current,
         updatedAt: new Date().toISOString()
       }
       window.agentHub.saveSessions(data).catch((err: unknown) => {
@@ -146,9 +140,6 @@ export default function AgentHubApp(): JSX.Element {
         if (data.lastAgentId) {
           setSelectedAgentId(data.lastAgentId)
         }
-        if (data.defaultAgentId) {
-          setDefaultAgentId(data.defaultAgentId)
-        }
         // Load repo index
         const idx = repoIndex as { repos: RepoEntry[] } | null
         if (idx?.repos) {
@@ -167,38 +158,15 @@ export default function AgentHubApp(): JSX.Element {
     })()
   }, [])
 
-  // Check for pendingAgentHubWorkDir (cross-app jump from RepoNav)
+  // Check for pendingAgentHubWorkDir (cross-app jump from RepoNav).
+  // The jump ALWAYS opens the interactive dialog — the last-used agent is
+  // preselected via initialAgentId={selectedAgentId} so the user can pick any
+  // other agent (or confirm the remembered one).
   useEffect(() => {
     if (loading) return
     const pending = state.pendingAgentHubWorkDir
     if (!pending) return
     clearPendingWorkDir()
-
-    // If a default agent is configured AND detected, skip dialog — create directly.
-    const defId = defaultAgentIdRef.current
-    if (defId) {
-      const agent = agentsRef.current.find((a) => a.id === defId && a.detected)
-      if (agent) {
-        const dirBasename = pending.split(/[\\/]/).pop() || pending
-        const newSession: AgentSession = {
-          id: `sess-${Date.now().toString(36)}`,
-          title: `${agent.name} · ${dirBasename}`,
-          agentId: agent.id,
-          workDir: pending,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          launchCount: 0,
-          lastLaunchedAt: null
-        }
-        setSessions((prev) => [newSession, ...prev])
-        setActiveSessionId(newSession.id)
-        setSelectedAgentId(agent.id)
-        pendingSaveRef.current++
-        return
-      }
-    }
-
-    // No default agent — show dialog with workDir pre-filled
     setPendingWorkDir(pending)
     setShowNewSessionDialog(true)
   }, [loading, state.pendingAgentHubWorkDir, clearPendingWorkDir])
@@ -220,7 +188,7 @@ export default function AgentHubApp(): JSX.Element {
   }, [])
 
   const handleDialogCreate = useCallback(
-    (agentId: string, workDir: string, title: string, setAsDefault?: boolean): void => {
+    (agentId: string, workDir: string, title: string): void => {
       const newSession: AgentSession = {
         id: `sess-${Date.now().toString(36)}`,
         title,
@@ -234,9 +202,6 @@ export default function AgentHubApp(): JSX.Element {
       setSessions((prev) => [newSession, ...prev])
       setActiveSessionId(newSession.id)
       setSelectedAgentId(agentId)
-      if (setAsDefault) {
-        setDefaultAgentId(agentId)
-      }
       setShowNewSessionDialog(false)
       setPendingWorkDir(null)
       pendingSaveRef.current++
@@ -335,6 +300,33 @@ export default function AgentHubApp(): JSX.Element {
       setSelectedAgentId(session.agentId)
     }
   }, [])
+
+  // Probe a session's terminal for the slash commands its agent supports.
+  // Debounced per session so rapid "/" opens don't spam the PTY.
+  const probeTimerRef = useRef<Map<string, number>>(new Map())
+  const probeSessionCommands = useCallback((sessionId: string): void => {
+    const session = sessionsRef.current.find((s) => s.id === sessionId)
+    if (!session) return
+    const agent = agents.find((a) => a.id === session.agentId)
+    const command = agent?.command ?? session.agentId
+    // Debounce: ignore re-probes within 3s of the last one for this session
+    const last = probeTimerRef.current.get(sessionId) ?? 0
+    if (Date.now() - last < 3000) return
+    probeTimerRef.current.set(sessionId, Date.now())
+    window.agentHub
+      .listCommands(sessionId, command, session.workDir)
+      .then((cmds) => setSessionCommands((prev) => ({ ...prev, [sessionId]: cmds })))
+      .catch((err: unknown) => {
+        console.error('Failed to probe session commands', err)
+        setSessionCommands((prev) => ({ ...prev, [sessionId]: [] }))
+      })
+  }, [agents])
+
+  // Probe the active session's terminal once it's focused, so the "/" palette
+  // is pre-populated. Subsequent opens refresh via onSlashOpen (debounced above).
+  useEffect(() => {
+    if (activeSessionId) probeSessionCommands(activeSessionId)
+  }, [activeSessionId, probeSessionCommands])
 
   const handleRescan = useCallback(async (): Promise<void> => {
     try {
@@ -442,6 +434,8 @@ export default function AgentHubApp(): JSX.Element {
                           content state (panels stay always-mounted via display:none). */}
                       <MarkdownEditor
                         width={mdWidth}
+                        commands={sessionCommands[s.id] ?? []}
+                        onSlashOpen={() => probeSessionCommands(s.id)}
                         onResize={(w) => setMdWidth(w)}
                         onOpenHistory={() => handleOpenHistory(s.id)}
                         ref={(handle) => {
@@ -499,6 +493,7 @@ export default function AgentHubApp(): JSX.Element {
           agents={agents}
           repos={repos}
           initialWorkDir={pendingWorkDir ?? undefined}
+          initialAgentId={selectedAgentId}
           onClose={handleDialogClose}
           onCreate={handleDialogCreate}
           onAddCustomAgent={handleAddCustomAgent}

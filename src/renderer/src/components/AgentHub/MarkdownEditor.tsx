@@ -1,8 +1,13 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import type { AgentCommandDef } from '@shared/agentHub'
 
 interface MarkdownEditorProps {
   /** Send markdown content into the active terminal. Returns success. */
   onSend?: (content: string) => boolean
+  /** Slash commands the session's agent supports (live-probed from its terminal). */
+  commands: AgentCommandDef[]
+  /** Called when the "/" palette opens — lets the parent re-probe the terminal. */
+  onSlashOpen?: () => void
   /** Expanded editor width in px (shared across sessions, controlled by the parent). */
   width: number
   /** Called while the user drags the editor's right-edge resizer. */
@@ -46,12 +51,24 @@ function startResizeDrag(
 }
 
 /**
+ * Detect an in-progress slash token ending at the caret ("/…" after line start
+ * or whitespace). Returns null when "/" is mid-word ("http://", "a/b") so the
+ * command palette only wakes up for a freshly started token.
+ */
+function getSlashSegment(value: string, caret: number): { start: number; query: string } | null {
+  const m = value.slice(0, caret).match(/(^|\s)\/([\w-]*)$/)
+  if (!m) return null
+  return { start: (m.index ?? 0) + m[1].length, query: m[2] }
+}
+
+/**
  * Collapsible Markdown editor panel with formatting helpers.
  *
  * Expanded layout is 4 rows:
  *   1. Navbar — collapse toggle (left) + history button (right)
  *   2. Toolbar — markdown formatting shortcuts
- *   3. Editor — the textarea
+ *   3. Editor — the textarea, with a slash-command palette overlay (typing "/"
+ *      wakes it; the palette lists the hub's agents and inserts "/<command> ")
  *   4. Footer — copy + send-to-terminal buttons
  * Collapsed: a narrow vertical strip showing only the toggle button.
  *
@@ -60,13 +77,18 @@ function startResizeDrag(
  * (MarkdownHandle.setContent) for loading a history entry back into the editor.
  */
 const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { onSend, width, onResize, onOpenHistory }: MarkdownEditorProps,
+  { onSend, width, onResize, onOpenHistory, commands, onSlashOpen }: MarkdownEditorProps,
   ref
 ): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const [content, setContent] = useState('')
   const [copied, setCopied] = useState(false)
   const [sentState, setSentState] = useState<'sent' | 'failed' | null>(null)
+  // Slash-command palette: in-progress query + highlighted index (null = closed)
+  const [slashMenu, setSlashMenu] = useState<{ query: string; index: number } | null>(null)
+  // Tracks whether the palette is currently open (ref, so the change handler
+  // can detect the null→open transition without re-creating itself).
+  const slashOpenRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sentTimerRef = useRef<number | null>(null)
   const copiedTimerRef = useRef<number | null>(null)
@@ -95,6 +117,19 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
       }
     }
   }, [])
+
+  // Slash palette: filter the agent's commands by the in-progress query (name/description)
+  const slashQuery = slashMenu?.query.toLowerCase() ?? ''
+  const slashMatches = slashMenu
+    ? commands.filter(
+        (c) => c.name.toLowerCase().includes(slashQuery) || c.description.toLowerCase().includes(slashQuery)
+      )
+    : []
+  // Clamp the highlighted index to the filtered length (empty list → 0)
+  const slashActiveIndex = slashMenu
+    ? Math.min(slashMenu.index, Math.max(0, slashMatches.length - 1))
+    : 0
+  const slashActive = slashMenu && slashMatches.length > 0 ? slashMatches[slashActiveIndex] : null
 
   const handleToggle = useCallback((): void => {
     setExpanded((v) => !v)
@@ -248,23 +283,96 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
     scheduleSentReset()
   }, [content, onSend, scheduleSentReset])
 
+  // Insert a chosen command at the caret: "/<command> " then keep focus for typing.
+  const applySlash = useCallback(
+    (command: AgentCommandDef): void => {
+      const ta = textareaRef.current
+      if (!ta) return
+      const caret = ta.selectionStart
+      const seg = getSlashSegment(content, caret)
+      if (!seg) {
+        setSlashMenu(null)
+        return
+      }
+      const next = content.slice(0, seg.start) + '/' + command.name + ' ' + content.slice(caret)
+      setContent(next)
+      const pos = seg.start + command.name.length + 2
+      requestAnimationFrame(() => {
+        ta.focus()
+        ta.setSelectionRange(pos, pos)
+      })
+      slashOpenRef.current = false
+      setSlashMenu(null)
+    },
+    [content]
+  )
+
   const handleTextareaKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
       // Ctrl/Cmd + Enter → send content into the active terminal
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault()
         handleSend()
+        return
+      }
+
+      // Slash palette navigation (when open)
+      if (!slashMenu) return
+
+      const count = slashMatches.length
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        if (count === 0) return
+        setSlashMenu((prev) => (prev ? { ...prev, index: (prev.index + 1) % count } : prev))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        if (count === 0) return
+        setSlashMenu((prev) => (prev ? { ...prev, index: (prev.index - 1 + count) % count } : prev))
+      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        if (slashActive) applySlash(slashActive)
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        slashOpenRef.current = false
+        setSlashMenu(null)
       }
     },
-    [handleSend]
+    [handleSend, slashMenu, slashMatches, slashActive, applySlash]
   )
 
   const handleTextareaChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
-      setContent(e.target.value)
+      const el = e.target
+      setContent(el.value)
+      // Open/close the slash palette based on the token before the caret.
+      // NOTE: typing "/" only filters the ALREADY-LOADED command list — the
+      // live terminal probe is triggered by the explicit "⚡ 命令" button only,
+      // so accidental "/" keystrokes never inject into the running agent.
+      const caret = el.selectionStart
+      const seg = getSlashSegment(el.value, caret)
+      if (seg) {
+        slashOpenRef.current = true
+        setSlashMenu({ query: seg.query, index: 0 })
+      } else {
+        slashOpenRef.current = false
+        setSlashMenu(null)
+      }
     },
     []
   )
+
+  // Explicit slash-command button: focuses the editor, wakes the palette and
+  // asks the parent to probe the live terminal for the agent's commands.
+  // This is the ONLY path that triggers terminal probing — typing "/" in the
+  // textarea just filters the already-loaded list (see handleTextareaChange).
+  const handleOpenSlashCommand = useCallback((): void => {
+    const ta = textareaRef.current
+    if (!ta) return
+    ta.focus()
+    slashOpenRef.current = true
+    setSlashMenu({ query: '', index: 0 })
+    onSlashOpen?.()
+  }, [onSlashOpen])
 
   return (
     <div
@@ -310,18 +418,64 @@ const MarkdownEditor = forwardRef<MarkdownHandle, MarkdownEditorProps>(function 
             <button type="button" className="markdown-editor__toolbar-btn" onClick={handleOrderedList} title="有序列表">
               1.
             </button>
+
+            <div className="markdown-editor__toolbar-sep" />
+
+            {/* Explicit slash-command trigger: ONLY this button probes the live
+                terminal — typing "/" in the editor filters cached commands only,
+                so accidental "/" keystrokes never inject into the running agent. */}
+            <button
+              type="button"
+              className="markdown-editor__toolbar-btn markdown-editor__toolbar-btn--slash"
+              onClick={handleOpenSlashCommand}
+              title="从当前终端探测 Agent 的斜杠命令"
+            >
+              ⚡ 命令
+            </button>
           </div>
 
-          {/* Row 3 — Editor */}
-          <textarea
-            ref={textareaRef}
-            className="markdown-editor__textarea"
-            value={content}
-            onChange={handleTextareaChange}
-            onKeyDown={handleTextareaKeyDown}
-            placeholder="在此编写 Markdown…"
-            spellCheck={false}
-          />
+          {/* Row 3 — Editor (slash palette overlays the textarea) */}
+          <div className="markdown-editor__editor-wrap">
+            {slashMenu && (
+              <div
+                className="markdown-editor__slash-menu"
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                {slashMatches.length === 0 ? (
+                  <div className="markdown-editor__slash-menu-empty">无匹配命令</div>
+                ) : (
+                  slashMatches.map((c, i) => (
+                    <button
+                      type="button"
+                      key={c.name}
+                      className={`markdown-editor__slash-menu-item ${
+                        i === slashActiveIndex ? 'markdown-editor__slash-menu-item--active' : ''
+                      }`}
+                      onMouseEnter={() => setSlashMenu((prev) => (prev ? { ...prev, index: i } : prev))}
+                      onClick={() => applySlash(c)}
+                    >
+                      <span className="markdown-editor__slash-menu-item-code">/{c.name}</span>
+                      <span className="markdown-editor__slash-menu-item-name">{c.name}</span>
+                      <span className="markdown-editor__slash-menu-item-desc">{c.description}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              className="markdown-editor__textarea"
+              value={content}
+              onChange={handleTextareaChange}
+              onKeyDown={handleTextareaKeyDown}
+              onBlur={() => {
+                slashOpenRef.current = false
+                setSlashMenu(null)
+              }}
+              placeholder="在此编写 Markdown…（⚡ 命令 或输入 / 唤起命令）"
+              spellCheck={false}
+            />
+          </div>
 
           {/* Row 4 — Footer: copy + send-to-terminal */}
           <div className="markdown-editor__footer">

@@ -144,6 +144,12 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
 
     // ── Auto-fit on container resize ──
     const resizeObserver = new ResizeObserver(() => {
+      // Hidden panels (display:none — inactive sessions or sub-app switches)
+      // report 0 size. Fitting here would resize the PTY to ~1x1, which makes
+      // TUI agents (opencode, claude, ...) crash with exit code 3. Skip until
+      // the panel is visible again — RO then fires with the real dimensions.
+      const el = containerRef.current
+      if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return
       try { fitAddon.fit() } catch { /* not ready */ }
     })
     resizeObserver.observe(containerRef.current)

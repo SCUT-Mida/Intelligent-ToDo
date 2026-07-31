@@ -1107,6 +1107,18 @@
   color: var(--text);
 }
 
+/* Explicit slash-command trigger — accent color so it stands out from the
+   formatting shortcuts (it's the ONLY button that probes the live terminal). */
+.markdown-editor__toolbar-btn--slash {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+}
+
+.markdown-editor__toolbar-btn--slash:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
 .markdown-editor__toolbar-sep {
   width: 1px;
   height: 18px;
@@ -1206,6 +1218,80 @@
 
 .markdown-editor__textarea::placeholder {
   color: var(--text-faint);
+}
+
+/* ── Slash-command palette (overlays the textarea, terminal-like / menu) ──── */
+
+.markdown-editor__editor-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.markdown-editor__slash-menu {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  right: 8px;
+  z-index: 30;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.markdown-editor__slash-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text);
+}
+
+.markdown-editor__slash-menu-item:hover,
+.markdown-editor__slash-menu-item--active {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.markdown-editor__slash-menu-item-code {
+  font-weight: 700;
+  font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.markdown-editor__slash-menu-item-name {
+  opacity: 0.85;
+}
+
+.markdown-editor__slash-menu-item-desc {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.markdown-editor__slash-menu-empty {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 /* ── Terminal wrapper (hosts markdown-editor + terminal side by side) ─────── */

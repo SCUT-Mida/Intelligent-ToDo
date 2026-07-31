@@ -13,6 +13,7 @@ import type { WebContents } from 'electron'
 import { join, dirname } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { PTY_STREAM } from '../../shared/agentHub'
+import type { AgentCommandDef } from '../../shared/agentHub'
 import { logger } from '../logger'
 
 // node-pty types from @lydell/node-pty
@@ -33,10 +34,110 @@ interface PtySession {
   pty: IPty
   /** The AgentSession.id that owns this PTY. */
   sessionId: string
+  /** Last time the PTY emitted output (used for idle detection before probing). */
+  lastOutputAt: number
+  /** When non-null, output is captured here instead of forwarded (probe in flight). */
+  captureBuffer: string | null
 }
 
 /** Active PTY sessions keyed by AgentSession.id. */
 const sessions = new Map<string, PtySession>()
+
+/**
+ * Only probe a terminal that has been completely quiet for this long. Probing
+ * injects `/` into the live PTY — never do that while the agent is streaming
+ * output or the user is mid-keystroke (it would corrupt the input line).
+ */
+const PROBE_IDLE_MS = 1500
+/** How long to capture the agent's rendered command menu after sending `/`. */
+const PROBE_CAPTURE_MS = 600
+/** Extra wait after sending Escape so the dismissal repaint is also suppressed. */
+const PROBE_DISMISS_MS = 150
+
+/**
+ * Strip ANSI/CSI/OSC escape sequences from captured terminal output so the
+ * raw text of the rendered menu can be parsed.
+ */
+const ANSI_ESCAPE_RE =
+  /[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g
+
+/**
+ * Parse the agent's rendered slash-command menu from captured PTY output.
+ * Menu items render as `/command  description` (possibly wrapped in box-drawing
+ * decorations); we extract every slash token and keep the first description.
+ */
+function parseProbedMenu(raw: string): AgentCommandDef[] {
+  const clean = raw
+    .replace(ANSI_ESCAPE_RE, '')
+    .replace(/\r/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+  const seen = new Map<string, string>()
+  for (const line of clean.split('\n')) {
+    const m = line.match(/\/([\w][\w\-/.]*)/)
+    if (!m) continue
+    const name = m[1].replace(/[.\/]+$/, '')
+    if (!name || name.length > 40) continue
+    const after = line.slice((m.index ?? 0) + m[0].length)
+    const desc = after.replace(/^[\s:│|┃\-–—>]+/, '').trim().slice(0, 100)
+    if (!seen.has(name)) seen.set(name, desc)
+  }
+  return [...seen.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([name, description]) => ({ name, description }))
+}
+
+/**
+ * Probe the live terminal for the slash commands the agent actually supports.
+ *
+ * This is REAL terminal interaction: we send `/` to the running PTY, capture the
+ * menu the agent itself renders (ANSI output), then send Escape to dismiss it.
+ * Whatever the agent shows in its own TUI is exactly what comes back — no config
+ * file mapping needed, works for any agent.
+ *
+ * Guards:
+ * - The terminal must be idle (no I/O for PROBE_IDLE_MS) — we never interrupt
+ *   streaming output or a user who is typing.
+ * - Output is suppressed while probing so the user doesn't see the flash.
+ *
+ * Returns an empty array when the terminal is busy/unavailable or the agent
+ * renders no slash menu.
+ */
+export function probeCommands(sessionId: string): Promise<AgentCommandDef[]> {
+  const session = sessions.get(sessionId)
+  if (!session) return Promise.resolve([])
+  if (session.captureBuffer !== null) return Promise.resolve([])
+  if (Date.now() - session.lastOutputAt < PROBE_IDLE_MS) return Promise.resolve([])
+
+  return new Promise((resolve) => {
+    session.captureBuffer = ''
+    let settled = false
+    const settle = (commands: AgentCommandDef[]): void => {
+      if (settled) return
+      settled = true
+      session.captureBuffer = null
+      resolve(commands)
+    }
+
+    try {
+      session.pty.write('/')
+    } catch {
+      settle([])
+      return
+    }
+
+    // After the capture window, dismiss the menu with Escape, wait for the
+    // repaint to settle, then hand back the parsed commands.
+    setTimeout(() => {
+      try {
+        session.pty.write('\x1b')
+      } catch {
+        /* process may have exited */
+      }
+      const captured = session.captureBuffer ?? ''
+      setTimeout(() => settle(parseProbedMenu(captured)), PROBE_DISMISS_MS)
+    }, PROBE_CAPTURE_MS)
+  })
+}
 
 /** Lazy-load the native module (only available in main process). */
 let ptyModule: { spawn: (file: string, args: string[] | string, options: Record<string, unknown>) => IPty } | undefined
@@ -215,10 +316,17 @@ export function createPty(
       } as Record<string, string>
     }) as IPty
 
-    const session: PtySession = { pty: proc, sessionId }
+    const session: PtySession = { pty: proc, sessionId, lastOutputAt: Date.now(), captureBuffer: null }
     sessions.set(sessionId, session)
 
     proc.onData((data: string) => {
+      session.lastOutputAt = Date.now()
+      // While a probe is in flight, capture the rendered menu instead of
+      // forwarding it — the user should never see the injected "/" flash.
+      if (session.captureBuffer !== null) {
+        session.captureBuffer += data
+        return
+      }
       safeSend(sender, PTY_STREAM.DATA, sessionId, data)
     })
 
@@ -250,9 +358,10 @@ export function sendInput(sessionId: string, data: string): void {
 /** Resize a PTY to match the xterm.js terminal dimensions. */
 export function resizePty(sessionId: string, cols: number, rows: number): void {
   const session = sessions.get(sessionId)
-  if (session) {
-    try { session.pty.resize(cols, rows) } catch { /* process may have exited */ }
-  }
+  // Ignore degenerate sizes — resizing to 0/negative dimensions is never
+  // legitimate and can crash the PTY-side TUI app.
+  if (!session || !Number.isFinite(cols) || !Number.isFinite(rows) || cols < 1 || rows < 1) return
+  try { session.pty.resize(cols, rows) } catch { /* process may have exited */ }
 }
 
 /** Kill a PTY process. */

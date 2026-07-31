@@ -13,9 +13,11 @@ interface NewSessionDialogProps {
   repos: RepoEntry[]
   /** Pre-filled workDir when jumping from RepoNav. */
   initialWorkDir?: string
+  /** Preferred preselected agent (the last-used one); falls back if unknown. */
+  initialAgentId?: string
   onClose: () => void
   /** Called with (agentId, workDir, title) when user confirms creation. */
-  onCreate: (agentId: string, workDir: string, title: string, setAsDefault?: boolean) => void
+  onCreate: (agentId: string, workDir: string, title: string) => void
   onAddCustomAgent?: (command: string) => Promise<boolean>
 }
 
@@ -23,7 +25,8 @@ interface NewSessionDialogProps {
  * Modal dialog for creating a new Agent Hub session.
  *
  * Contains:
- *  - Agent picker (reuses AgentPicker component)
+ *  - Agent picker (reuses AgentPicker component, preselected to the last-used
+ *    agent passed via initialAgentId when it exists)
  *  - Work directory picker with repo dropdown (reuses WorkDirPicker)
  *  - Auto-suggested editable title
  *  - Create / Cancel buttons
@@ -35,19 +38,22 @@ export default function NewSessionDialog({
   agents,
   repos,
   initialWorkDir,
+  initialAgentId,
   onClose,
   onCreate,
   onAddCustomAgent
 }: NewSessionDialogProps): JSX.Element {
-  // Determine default agent: first detected, or first in list
-  const defaultAgentId =
-    agents.find((a) => a.detected)?.id ?? agents[0]?.id ?? 'claude'
-
-  const [agentId, setAgentId] = useState(defaultAgentId)
+  // Preferred agent: the last-used one (initialAgentId) if present in the list,
+  // else the first detected agent, else the first agent, else 'claude'.
+  const [agentId, setAgentId] = useState(() => {
+    if (initialAgentId && agents.some((a) => a.id === initialAgentId)) {
+      return initialAgentId
+    }
+    return agents.find((a) => a.detected)?.id ?? agents[0]?.id ?? 'claude'
+  })
   const [workDir, setWorkDir] = useState(initialWorkDir ?? '')
   const [title, setTitle] = useState('')
   const [titleTouched, setTitleTouched] = useState(false)
-  const [setAsDefault, setSetAsDefault] = useState(false)
 
   const canCreate = agentId.length > 0 && workDir.length > 0
 
@@ -96,8 +102,8 @@ export default function NewSessionDialog({
   const handleCreate = useCallback((): void => {
     if (!canCreate) return
     const finalTitle = title.trim() || suggestTitle(agentId, workDir)
-    onCreate(agentId, workDir, finalTitle, setAsDefault)
-  }, [canCreate, title, suggestTitle, agentId, workDir, onCreate, setAsDefault])
+    onCreate(agentId, workDir, finalTitle)
+  }, [canCreate, title, suggestTitle, agentId, workDir, onCreate])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent): void => {
@@ -155,16 +161,6 @@ export default function NewSessionDialog({
             autoFocus={!initialWorkDir}
           />
         </div>
-
-        {/* Default agent checkbox */}
-        <label className="new-session-dialog__checkbox-label">
-          <input
-            type="checkbox"
-            checked={setAsDefault}
-            onChange={(e) => setSetAsDefault(e.target.checked)}
-          />
-          <span>记住为默认 Agent（从仓库导航跳转时自动使用，无需选择）</span>
-        </label>
 
         {/* Actions */}
         <div className="new-session-dialog__actions">
