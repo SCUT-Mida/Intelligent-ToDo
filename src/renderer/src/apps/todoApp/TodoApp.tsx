@@ -35,7 +35,7 @@ export default function TodoApp(): JSX.Element {
   const { state, dispatch } = useAppContext()
   const { data } = state
 
-  const [todoView, setTodoView] = useState<TodoView>('board')
+  const [todoView, setTodoView] = useState<TodoView>('priority')
   const [taskModal, setTaskModal] = useState<{ task: Task | null; quadrant: Quadrant } | null>(null)
   const [guideOpen, setGuideOpen] = useState(false)
   const [aiState, setAiState] = useState<AiState>({ kind: 'idle' })
@@ -408,16 +408,16 @@ export default function TodoApp(): JSX.Element {
         <div className="toolbar__title">智能化代办</div>
         <div className="toolbar__tabs">
           <button
-            className={`toolbar__tab ${todoView === 'board' ? 'toolbar__tab--active' : ''}`}
-            onClick={() => setTodoView('board')}
-          >
-            任务看板
-          </button>
-          <button
             className={`toolbar__tab ${todoView === 'priority' ? 'toolbar__tab--active' : ''}`}
             onClick={() => setTodoView('priority')}
           >
             今日优先
+          </button>
+          <button
+            className={`toolbar__tab ${todoView === 'board' ? 'toolbar__tab--active' : ''}`}
+            onClick={() => setTodoView('board')}
+          >
+            任务看板
           </button>
           <button
             className={`toolbar__tab ${todoView === 'calendar' ? 'toolbar__tab--active' : ''}`}
