@@ -121,6 +121,12 @@ export default function TerminalView({ sessionId, command, workDir, onExit }: Te
     // paste in the CAPTURE phase (runs before xterm's target-phase listener),
     // prevent the default insertion, and read the clipboard from the MAIN process
     // (electron.clipboard.readText()) which is always reliable.
+    //
+    // The text is injected via term.paste() — NOT raw sendInput — because paste()
+    // normalizes CRLF/LF line endings to \r and wraps the text in bracketed-paste
+    // markers (\x1b[200~ ... \x1b[201~) when the CLI app enabled them. Without the
+    // markers, a multi-line paste would be executed line-by-line as if typed.
+    // term.paste() then fires onData, which the handler above forwards to the PTY.
     const container = containerRef.current
     const onPasteCapture = (e: ClipboardEvent): void => {
       e.preventDefault()
@@ -128,14 +134,14 @@ export default function TerminalView({ sessionId, command, workDir, onExit }: Te
 
       const clipText = e.clipboardData?.getData('text/plain') ?? ''
       if (clipText) {
-        // clipboardData has the text — send it straight to the PTY (no IPC round-trip)
-        window.agentHub.sendInput(sessionId, clipText)
+        // clipboardData has the text — inject straight to the terminal (no IPC round-trip)
+        term.paste(clipText)
       } else {
         // clipboardData empty (Electron async-clipboard quirk) → read via main process
         window.agentHub
           .readClipboard()
           .then((text) => {
-            if (text && terminalRef.current) window.agentHub.sendInput(sessionId, text)
+            if (text && terminalRef.current) terminalRef.current.paste(text)
           })
           .catch((err: unknown) => {
             console.error('[TerminalView] readClipboard failed', err)
