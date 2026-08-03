@@ -30,15 +30,25 @@ function HistoryEntry({ entry, onReEdit }: HistoryEntryProps): JSX.Element {
     // when the entry was already expanded before the content changed).
     const prevDisplay = el.style.display
     const prevClamp = el.style.webkitLineClamp
+    const prevBoxOrient = el.style.webkitBoxOrient
+    const prevOverflow = el.style.overflow
     const prevMaxHeight = el.style.maxHeight
+    // -webkit-line-clamp only takes effect together with box-orient: vertical
+    // AND overflow: hidden — missing either turns it into a no-op, so the
+    // "clamped" measurement would equal the full height and overflow would
+    // never be detected (entries never collapse).
     el.style.display = '-webkit-box'
+    el.style.webkitBoxOrient = 'vertical'
     el.style.webkitLineClamp = '3'
+    el.style.overflow = 'hidden'
     el.style.maxHeight = 'none'
     const clampedHeight = el.clientHeight
     el.style.webkitLineClamp = 'unset'
     const fullHeight = el.scrollHeight
     el.style.display = prevDisplay
+    el.style.webkitBoxOrient = prevBoxOrient
     el.style.webkitLineClamp = prevClamp
+    el.style.overflow = prevOverflow
     el.style.maxHeight = prevMaxHeight
     setOverflowing(fullHeight > clampedHeight + 1)
     setExpanded(false)
