@@ -1,6 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { AgentSession, AgentDescriptor } from '@shared/agentHub'
 
+// Group key for sessions without a workDir (shouldn't normally happen).
+const OTHER_GROUP = '\u0000other'
+
 interface SessionSidebarProps {
   sessions: AgentSession[]
   agents: AgentDescriptor[]
@@ -74,6 +77,9 @@ export default function SessionSidebar({
   const [editValue, setEditValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // WorkDir groups collapsed by the user (keyed by the group key).
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+
   // Sort: most recent launch first, then by creation date
   const sorted = [...sessions].sort((a, b) => {
     const aTime = a.lastLaunchedAt ? new Date(a.lastLaunchedAt).getTime() : 0
@@ -81,6 +87,42 @@ export default function SessionSidebar({
     if (aTime !== bTime) return bTime - aTime
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   })
+
+  // Group sessions by workDir (repo). Groups are ordered by their newest
+  // session's activity so the most recently used repos float to the top.
+  const groupKeys: string[] = []
+  const groupsMap = new Map<string, AgentSession[]>()
+  for (const s of sorted) {
+    const key = s.workDir || OTHER_GROUP
+    const arr = groupsMap.get(key)
+    if (arr) {
+      arr.push(s)
+    } else {
+      groupsMap.set(key, [s])
+      groupKeys.push(key)
+    }
+  }
+  const newestTime = (list: AgentSession[]): number =>
+    list.reduce(
+      (max, s) => Math.max(max, s.lastLaunchedAt ? new Date(s.lastLaunchedAt).getTime() : new Date(s.createdAt).getTime()),
+      0
+    )
+  groupKeys.sort((a, b) => newestTime(groupsMap.get(a)!) - newestTime(groupsMap.get(b)!))
+
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }, [])
+
+  const getGroupLabel = (key: string): string =>
+    key === OTHER_GROUP ? '其他' : getDirBasename(key)
 
   // Focus input when starting edit
   useEffect(() => {
@@ -176,87 +218,99 @@ export default function SessionSidebar({
             暂无会话，点击「＋ 新建」开始
           </div>
         ) : (
-          sorted.map((session) => {
-            const isActive = session.id === activeSessionId
-            const isEditing = session.id === editingId
-            const dirBase = getDirBasename(session.workDir)
-
+          groupKeys.map((key) => {
+            const group = groupsMap.get(key)!
+            const isCollapsed = collapsedGroups.has(key)
             return (
-              <div
-                key={session.id}
-                className={`agent-hub__sidebar-item ${isActive ? 'agent-hub__sidebar-item--active' : ''}`}
-                onClick={() => onSelect(session.id)}
-              >
-                <span className="agent-hub__sidebar-item-icon">
-                  {getAgentIcon(session.agentId)}
-                </span>
-                <div className="agent-hub__sidebar-item-body">
-                  {isEditing ? (
-                    <input
-                      ref={inputRef}
-                      className="agent-hub__sidebar-item-title-input"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      onBlur={() => handleRenameSubmit(session.id)}
-                      onKeyDown={(e) => handleKeyDown(e, session.id)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  ) : (
-                    <div
-                      className="agent-hub__sidebar-item-title"
-                      onDoubleClick={(e) => {
-                        e.stopPropagation()
-                        handleDoubleClick(session.id, session.title)
-                      }}
-                      title={session.title}
-                    >
-                      {session.title}
-                    </div>
-                  )}
-                  <div className="agent-hub__sidebar-item-meta">
-                    {dirBase && (
-                      <>
-                        <span>{dirBase}</span>
-                        <span>·</span>
-                      </>
-                    )}
-                    {session.launchCount > 0 && (
-                      <>
-                        <span className="agent-hub__sidebar-item-count">
-                          {session.launchCount} 次
+              <div key={key} className="agent-hub__sidebar-group">
+                <button
+                  type="button"
+                  className="agent-hub__sidebar-group-header"
+                  onClick={() => toggleGroup(key)}
+                  title={key === OTHER_GROUP ? undefined : key}
+                >
+                  <span className="agent-hub__sidebar-group-chevron">{isCollapsed ? '▸' : '▾'}</span>
+                  <span className="agent-hub__sidebar-group-label">{getGroupLabel(key)}</span>
+                  <span className="agent-hub__sidebar-group-count">{group.length}</span>
+                </button>
+                {!isCollapsed &&
+                  group.map((session) => {
+                    const isActive = session.id === activeSessionId
+                    const isEditing = session.id === editingId
+
+                    return (
+                      <div
+                        key={session.id}
+                        className={`agent-hub__sidebar-item ${isActive ? 'agent-hub__sidebar-item--active' : ''}`}
+                        onClick={() => onSelect(session.id)}
+                      >
+                        <span className="agent-hub__sidebar-item-icon">
+                          {getAgentIcon(session.agentId)}
                         </span>
-                        <span>·</span>
-                      </>
-                    )}
-                    {session.lastLaunchedAt ? (
-                      <span>{relativeTime(session.lastLaunchedAt)}</span>
-                    ) : (
-                      <span className="agent-hub__sidebar-item-new">新建</span>
-                    )}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="agent-hub__sidebar-item-action"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleDoubleClick(session.id, session.title)
-                  }}
-                  title="重命名"
-                >
-                  ✏️
-                </button>
-                <button
-                  type="button"
-                  className="agent-hub__sidebar-item-action agent-hub__sidebar-item-action--danger"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onDelete(session.id)
-                  }}
-                  title="删除会话"
-                >
-                  🗑
-                </button>
+                        <div className="agent-hub__sidebar-item-body">
+                          {isEditing ? (
+                            <input
+                              ref={inputRef}
+                              className="agent-hub__sidebar-item-title-input"
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onBlur={() => handleRenameSubmit(session.id)}
+                              onKeyDown={(e) => handleKeyDown(e, session.id)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          ) : (
+                            <div
+                              className="agent-hub__sidebar-item-title"
+                              onDoubleClick={(e) => {
+                                e.stopPropagation()
+                                handleDoubleClick(session.id, session.title)
+                              }}
+                              title={session.title}
+                            >
+                              {session.title}
+                            </div>
+                          )}
+                          <div className="agent-hub__sidebar-item-meta">
+                            {session.launchCount > 0 && (
+                              <>
+                                <span className="agent-hub__sidebar-item-count">
+                                  {session.launchCount} 次
+                                </span>
+                                <span>·</span>
+                              </>
+                            )}
+                            {session.lastLaunchedAt ? (
+                              <span>{relativeTime(session.lastLaunchedAt)}</span>
+                            ) : (
+                              <span className="agent-hub__sidebar-item-new">新建</span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="agent-hub__sidebar-item-action"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDoubleClick(session.id, session.title)
+                          }}
+                          title="重命名"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-hub__sidebar-item-action agent-hub__sidebar-item-action--danger"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onDelete(session.id)
+                          }}
+                          title="删除会话"
+                        >
+                          🗑
+                        </button>
+                      </div>
+                    )
+                  })}
               </div>
             )
           })
