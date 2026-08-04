@@ -156,7 +156,7 @@ export interface AgentHubData {
   lastAgentId?: string
   /** Default agent for quick-launch (e.g. from RepoNav jump). Skips the dialog. */
   defaultAgentId?: string
-  /** Per-session question history (keyed by session id). Newest last. */
+  /** Per-repo question history (keyed by workDir). Newest last. Survives session deletion. */
   histories: Record<string, SessionHistoryEntry[]>
   updatedAt: string
 }

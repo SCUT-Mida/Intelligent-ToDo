@@ -134,7 +134,16 @@ export default function AgentHubApp(): JSX.Element {
         setAgents(agentList)
         const data = hubData ?? createDefaultAgentHubData()
         setSessions(data.sessions)
-        setHistories(data.histories ?? {})
+        // History is keyed by workDir (repo path). Remap any entries still
+        // keyed by session id (pre-v1.18.3 shape) so they carry over.
+        const rawHistories = data.histories ?? {}
+        const remapped: Record<string, SessionHistoryEntry[]> = {}
+        for (const [key, entries] of Object.entries(rawHistories)) {
+          const session = data.sessions.find((s) => s.id === key)
+          const newKey = session?.workDir || key
+          remapped[newKey] = [...(remapped[newKey] ?? []), ...entries]
+        }
+        setHistories(remapped)
         if (data.lastAgentId) {
           setSelectedAgentId(data.lastAgentId)
         }
@@ -224,12 +233,9 @@ export default function AgentHubApp(): JSX.Element {
     setActiveSessionId((prev) => (prev === id ? null : prev))
     // Drop the session's markdown editor handle
     markdownRefs.current.delete(id)
-    // Drop the session's question history too
-    setHistories((prev) => {
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
+    // NOTE: question history is keyed by workDir (repo), NOT by session id,
+    // so it intentionally survives session deletion — a new session opened
+    // in the same repo will find the previous history.
     // Close the history dialog if it was showing the deleted session
     setHistorySessionId((prev) => (prev === id ? null : prev))
     pendingSaveRef.current++
@@ -237,19 +243,22 @@ export default function AgentHubApp(): JSX.Element {
 
   // ── Question history ────────────────────────────────────────────────────
 
-  // Record one entry per injection (markdown send or manual terminal paste).
-  // Capped at 100 entries per session (newest last).
+  // Record one entry per Markdown send. History is keyed by the session's
+  // workDir (repo) — NOT by session id — so it survives session deletion and
+  // is shared across sessions opened in the same repo. Capped at 100 entries.
   const recordHistory = useCallback(
-    (sessionId: string, content: string, source: 'markdown' | 'paste'): void => {
+    (sessionId: string, content: string): void => {
+      const session = sessionsRef.current.find((s) => s.id === sessionId)
+      const key = session?.workDir || sessionId
       const entry: SessionHistoryEntry = {
         id: `hist-${Date.now().toString(36)}`,
         at: new Date().toISOString(),
         content,
-        source
+        source: 'markdown'
       }
       setHistories((prev) => ({
         ...prev,
-        [sessionId]: [...(prev[sessionId] ?? []), entry].slice(-100)
+        [key]: [...(prev[key] ?? []), entry].slice(-100)
       }))
       // Flag for persistence — without this the new entry would never be
       // written to disk (the persist effect only saves when flagged).
@@ -266,7 +275,7 @@ export default function AgentHubApp(): JSX.Element {
       const handle = terminalRefs.current.get(sessionId)
       if (!handle) return false
       const ok = handle.paste(content, submit)
-      if (ok) recordHistory(sessionId, content, 'markdown')
+      if (ok) recordHistory(sessionId, content)
       return ok
     },
     [recordHistory]
@@ -433,7 +442,6 @@ export default function AgentHubApp(): JSX.Element {
                                 terminalRefs.current.delete(s.id)
                               }
                             }}
-                            onPasted={(content) => recordHistory(s.id, content, 'paste')}
                           />
                         </div>
                       ) : (
@@ -476,7 +484,7 @@ export default function AgentHubApp(): JSX.Element {
       {historySession && (
         <SessionHistoryDialog
           session={historySession}
-          entries={histories[historySession.id] ?? []}
+          entries={histories[historySession.workDir] ?? []}
           onClose={handleCloseHistory}
           onReEdit={(entry) => handleReEdit(historySession.id, entry.content)}
         />
