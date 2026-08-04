@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes'
 import '@xterm/xterm/css/xterm.css'
 
 export interface TerminalHandle {
@@ -81,7 +82,12 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
       cursorBlink: true,
       cursorStyle: 'bar',
       fontSize: 14,
-      fontFamily: '"Cascadia Code", "Fira Code", "SF Mono", Consolas, "Courier New", monospace',
+      // NOTE: the trailing emoji/icon fonts are critical — CLI agents (opencode,
+      // claude, hermes) emit emoji + Nerd Font glyphs for status icons. Without an
+      // emoji-capable fallback, Chromium glyph-falls-back to Segoe UI Emoji whose
+      // double-width metrics get clipped to a single cell (icon shows half).
+      fontFamily:
+        '"Cascadia Code", "Fira Code", "SF Mono", Consolas, "Courier New", "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", monospace',
       theme: {
         background: '#1e1e2e',
         foreground: '#cdd6f4',
@@ -109,6 +115,14 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
 
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
+
+    // Fix half-clipped emoji/icons (xterm.js issue #5893): the default Unicode
+    // V6 width tables classify emoji as single-width, so the canvas renderer
+    // draws the double-width glyph into ONE cell and clips the right half.
+    // The graphemes addon activates Unicode 15 (emoji-aware cell widths), so
+    // status icons render whole.
+    term.loadAddon(new UnicodeGraphemesAddon())
+
     term.open(containerRef.current)
 
     // Fit terminal to container size (must be after open()).
