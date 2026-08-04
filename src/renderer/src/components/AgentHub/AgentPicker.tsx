@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import type { AgentDescriptor } from '@shared/agentHub'
+import AgentIcon from './AgentIcon'
 
 interface AgentPickerProps {
   agents: AgentDescriptor[]
@@ -76,7 +77,11 @@ export default function AgentPicker({ agents, value, onChange, onAddCustomAgent 
         className={`agent-picker__trigger ${open ? 'agent-picker__trigger--open' : ''}`}
         onClick={() => setOpen((v) => !v)}
       >
-        {selected && <span className="agent-picker__trigger-icon">{selected.icon}</span>}
+        {selected && (
+          <span className="agent-picker__trigger-icon">
+            <AgentIcon agent={selected} size={16} />
+          </span>
+        )}
         <span>{selected?.name ?? '选择 Agent'}</span>
         <span className="agent-picker__trigger-arrow">{open ? '▲' : '▼'}</span>
       </button>
@@ -91,7 +96,9 @@ export default function AgentPicker({ agents, value, onChange, onAddCustomAgent 
                 className={`agent-picker__option ${isSelected ? 'agent-picker__option--selected' : ''} ${!agent.detected ? 'agent-picker__option--undetected' : ''}`}
                 onClick={() => handleSelect(agent.id)}
               >
-                <span className="agent-picker__option-icon">{agent.icon}</span>
+                <span className="agent-picker__option-icon">
+                  <AgentIcon agent={agent} size={16} />
+                </span>
                 <div className="agent-picker__option-info">
                   <div className="agent-picker__option-name">{agent.name}</div>
                   <div className="agent-picker__option-desc">{agent.description}</div>
@@ -133,7 +140,7 @@ export default function AgentPicker({ agents, value, onChange, onAddCustomAgent 
                   <input
                     type="text"
                     className="agent-picker__custom-input"
-                    placeholder="输入命令名，如: claude, gemini…"
+                    placeholder="输入命令名，如: claude, codeagent…"
                     value={customCmd}
                     onChange={(e) => setCustomCmd(e.target.value)}
                     onKeyDown={(e) => {

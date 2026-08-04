@@ -1606,3 +1606,43 @@
   height: 16px;
   cursor: pointer;
 }
+
+/* ── Agent brand icons (official SVG marks + wrapper badges) ─────────────── */
+
+.agent-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  line-height: 0;
+}
+
+.agent-icon__svg {
+  display: block;
+  color: var(--text);
+}
+
+.agent-icon__img {
+  display: block;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
+/* Corner badge marking an INTERNAL wrapper around the underlying tool
+   (codeAgent wraps Claude Code, NGA wraps OpenCode). */
+.agent-icon--wrapper .agent-icon__badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  min-width: 11px;
+  height: 11px;
+  padding: 0 2px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 11px;
+  text-align: center;
+  box-shadow: 0 0 0 1.5px var(--bg);
+}

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { AgentSession, AgentDescriptor } from '@shared/agentHub'
+import AgentIcon from './AgentIcon'
 
 // Group key for sessions without a workDir (shouldn't normally happen).
 const OTHER_GROUP = '\u0000other'
@@ -159,10 +160,6 @@ export default function SessionSidebar({
     [handleRenameSubmit]
   )
 
-  function getAgentIcon(agentId: string): string {
-    return agents.find((a) => a.id === agentId)?.icon ?? '💬'
-  }
-
   function getDirBasename(path: string): string {
     if (!path) return ''
     const parts = path.replace(/\\/g, '/').split('/')
@@ -245,7 +242,10 @@ export default function SessionSidebar({
                         onClick={() => onSelect(session.id)}
                       >
                         <span className="agent-hub__sidebar-item-icon">
-                          {getAgentIcon(session.agentId)}
+                          <AgentIcon
+                            agent={agents.find((a) => a.id === session.agentId)}
+                            size={14}
+                          />
                         </span>
                         <div className="agent-hub__sidebar-item-body">
                           {isEditing ? (

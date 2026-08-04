@@ -88,22 +88,9 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
     homepage: 'https://docs.anthropic.com/en/docs/claude-code'
   },
   {
-    id: 'gemini', name: 'Gemini CLI', icon: '💎', command: 'gemini',
-    description: 'Google Gemini 命令行助手',
-    outputMode: 'print',
-    homepage: 'https://github.com/google-gemini/gemini-cli'
-  },
-  {
-    id: 'codex', name: 'Codex CLI', icon: '🧬', command: 'codex',
-    description: 'OpenAI Codex 命令行编程助手',
-    outputMode: 'print',
-    homepage: 'https://github.com/openai/codex'
-  },
-  {
-    id: 'aider', name: 'Aider', icon: '✏️', command: 'aider',
-    description: '开源 AI pair programmer，支持多种模型',
-    outputMode: 'print',
-    homepage: 'https://aider.chat'
+    id: 'codeagent', name: 'codeAgent', icon: '🔮', command: 'codeagent',
+    description: 'codeAgent（内部 Claude Code 封装）',
+    outputMode: 'print'
   },
   {
     id: 'opencode', name: 'OpenCode', icon: '🔓', command: 'opencode',
@@ -112,12 +99,12 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
     homepage: 'https://opencode.ai'
   },
   {
-    id: 'hermes', name: 'Hermes', icon: '🏛', command: 'hermes',
+    id: 'hermes', name: 'Hermes', icon: '⚡', command: 'hermes',
     description: 'Hermes CLI 助手',
     outputMode: 'print'
   },
   {
-    id: 'nga', name: 'NGA', icon: '🔧', command: 'nga',
+    id: 'nga', name: 'NGA', icon: '🧰', command: 'nga',
     description: 'NGA（内部 opencode 封装）',
     outputMode: 'print'
   }
