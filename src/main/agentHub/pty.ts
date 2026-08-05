@@ -14,6 +14,7 @@ import { join, dirname } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { PTY_STREAM } from '../../shared/agentHub'
 import { logger } from '../logger'
+import { tokenizeArgs } from './args'
 
 // node-pty types from @lydell/node-pty
 type IPty = {
@@ -178,6 +179,9 @@ function parseNpmCmdShim(cmdPath: string): { file: string; args: string[] } | nu
  * Spawn a CLI agent in a ConPTY. The renderer receives output via PTY_STREAM.DATA
  * events and sends input via the PTY_INPUT IPC channel.
  *
+ * @param args Optional space-separated string of extra CLI args (e.g.
+ *   `--model opus --foo "bar baz"`) appended to the resolved spawn command.
+ *   Tokenized via `tokenizeArgs` (shell-style quoting supported).
  * @returns true on success, false on failure.
  */
 export function createPty(
@@ -186,7 +190,8 @@ export function createPty(
   command: string,
   workDir: string,
   cols: number,
-  rows: number
+  rows: number,
+  args?: string
 ): boolean {
   // If a PTY already exists for this session (e.g. user switched back), kill it first.
   const existing = sessions.get(sessionId)
@@ -199,10 +204,12 @@ export function createPty(
     const pty = getPtyModule()
     // Resolve command: parse .cmd shims to spawn node directly (bypasses
     // cmd.exe so TUI apps get raw PTY access for keyboard input).
-    const { file, args } = buildSpawnTarget(command)
-    logger.info('agentHub:pty', 'spawning', { sessionId, command, target: file, args, workDir, cols, rows })
+    const { file, args: resolvedArgs } = buildSpawnTarget(command)
+    const userArgs = args ? tokenizeArgs(args) : []
+    const finalArgs = [...resolvedArgs, ...userArgs]
+    logger.info('agentHub:pty', 'spawning', { sessionId, command, target: file, args: finalArgs, userArgs, workDir, cols, rows })
 
-    const proc = pty.spawn(file, args, {
+    const proc = pty.spawn(file, finalArgs, {
       name: 'xterm-256color',
       cols,
       rows,

@@ -12,7 +12,10 @@
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "build:win": "electron-vite build && electron-builder --win",
-    "gen:icon": "node scripts/generate-icon.mjs"
+    "gen:icon": "node scripts/generate-icon.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.14",

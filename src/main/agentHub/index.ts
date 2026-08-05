@@ -12,9 +12,10 @@ import { execFileSync } from 'child_process'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { AGENT_IPC } from '../../shared/agentHub'
-import type { AgentHubData, AgentProbeResult, LaunchPayload, LaunchResult } from '../../shared/agentHub'
+import type { AgentHubData, AgentHubConfig, AgentProbeResult, LaunchPayload, LaunchResult } from '../../shared/agentHub'
 import { detectAgents } from './detect'
 import { loadSessions, saveSessions } from './persistence'
+import { getAgentConfig, saveAgentConfig } from './agentConfig'
 import { createPty, sendInput, resizePty, killPty, killAllPtys } from './pty'
 import { openRepoInTerminal } from '../repoNav/launcher'
 import { getConfig as getRepoNavConfig } from '../repoNav/config'
@@ -25,7 +26,11 @@ export { killAllPtys }
 
 export function registerAgentHubIpc(ipc: typeof ipcMain): void {
   ipc.handle(AGENT_IPC.LIST_AGENTS, async () => {
-    try { return await detectAgents() } catch (err) {
+    try {
+      // Read config so detection includes custom agents + applies args overrides.
+      const config = getAgentConfig()
+      return await detectAgents(config.customAgents, config.agentArgs)
+    } catch (err) {
       logger.error('agentHub:ipc', 'LIST_AGENTS failed', { error: err instanceof Error ? err.message : String(err) })
       return []
     }
@@ -36,6 +41,18 @@ export function registerAgentHubIpc(ipc: typeof ipcMain): void {
   ipc.handle(AGENT_IPC.SAVE_SESSIONS, (_e, data: AgentHubData): boolean => {
     try { saveSessions(data); return true } catch (err) {
       logger.error('agentHub:ipc', 'SAVE_SESSIONS failed', { error: err instanceof Error ? err.message : String(err) })
+      return false
+    }
+  })
+
+  // GET_AGENT_CONFIG: load custom agents + per-agent args from disk.
+  ipc.handle(AGENT_IPC.GET_AGENT_CONFIG, (): AgentHubConfig => getAgentConfig())
+
+  // SAVE_AGENT_CONFIG: persist custom agents + per-agent args. Updates the
+  // in-memory cache so the next LIST_AGENTS reflects the change immediately.
+  ipc.handle(AGENT_IPC.SAVE_AGENT_CONFIG, (_e, cfg: AgentHubConfig): boolean => {
+    try { saveAgentConfig(cfg); return true } catch (err) {
+      logger.error('agentHub:ipc', 'SAVE_AGENT_CONFIG failed', { error: err instanceof Error ? err.message : String(err) })
       return false
     }
   })
@@ -96,9 +113,14 @@ export function registerAgentHubIpc(ipc: typeof ipcMain): void {
   })
 
   // ── Embedded PTY handlers ────────────────────────────────────────────────
-  ipc.handle(AGENT_IPC.PTY_CREATE, (e, sessionId: string, command: string, workDir: string, cols: number, rows: number) => {
-    return createPty(e.sender, sessionId, command, workDir, cols, rows)
-  })
+  // PTY_CREATE: spawn a CLI agent in a ConPTY. `args` is an optional last
+  // param (space-separated string) appended to the resolved spawn command.
+  ipc.handle(
+    AGENT_IPC.PTY_CREATE,
+    (e, sessionId: string, command: string, workDir: string, cols: number, rows: number, args?: string) => {
+      return createPty(e.sender, sessionId, command, workDir, cols, rows, args)
+    }
+  )
 
   ipc.handle(AGENT_IPC.PTY_INPUT, (_e, sessionId: string, data: string) => {
     sendInput(sessionId, data)

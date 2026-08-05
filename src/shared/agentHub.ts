@@ -19,12 +19,16 @@
 // ── IPC channels (renderer → main, request/response) ────────────────────────
 
 export const AGENT_IPC = {
-  /** Detect installed CLI agents on this machine. Returns AgentDescriptor[]. */
-  LIST_AGENTS: 'agentHub:listAgents',
-  /** Load all saved sessions from disk. */
-  GET_SESSIONS: 'agentHub:getSessions',
-  /** Persist all sessions to disk. */
-  SAVE_SESSIONS: 'agentHub:saveSessions',
+   /** Detect installed CLI agents on this machine. Returns AgentDescriptor[]. */
+   LIST_AGENTS: 'agentHub:listAgents',
+   /** Load all saved sessions from disk. */
+   GET_SESSIONS: 'agentHub:getSessions',
+   /** Persist all sessions to disk. */
+   SAVE_SESSIONS: 'agentHub:saveSessions',
+   /** Load the Agent Hub configuration (custom agents + per-agent args). */
+   GET_AGENT_CONFIG: 'agentHub:getAgentConfig',
+   /** Persist the Agent Hub configuration. */
+   SAVE_AGENT_CONFIG: 'agentHub:saveAgentConfig',
   /**
    * Launch an agent in a system terminal window at the given workDir.
    * Returns the launch result (success/failure + method).
@@ -78,6 +82,12 @@ export interface AgentDefinition {
 export interface AgentDescriptor extends AgentDefinition {
   detected: boolean
   resolvedPath?: string
+  /**
+   * Resolved startup args for this agent (from AgentHubConfig.agentArgs[id]).
+   * Present only when the user has configured args for this agent. UI display
+   * field — the actual launch plumbing reads it from the descriptor.
+   */
+  args?: string
 }
 
 export const BUILTIN_AGENTS: AgentDefinition[] = [
@@ -150,6 +160,39 @@ export interface AgentHubData {
 
 export function createDefaultAgentHubData(): AgentHubData {
   return { version: 1, sessions: [], histories: {}, updatedAt: new Date().toISOString() }
+}
+
+// ── Agent Hub configuration (custom agents + per-agent startup args) ─────────
+
+/**
+ * Persistent Agent Hub configuration, stored at <userData>/agentHub-config.json
+ * (sibling to agentHub-sessions.json).
+ *
+ * - `customAgents`: user-defined agent definitions that survive restarts.
+ * - `agentArgs`: per-agent startup args keyed by agent id. Applies to BOTH
+ *   built-in and custom agents. This is the SINGLE source of truth for
+ *   "what args does this agent launch with" — resolved into AgentDescriptor
+ *   .args at detection time so the renderer never needs to fetch config
+ *   separately just to display args.
+ *
+ * Keeping args in a single map (instead of duplicating them inside each
+ * AgentDefinition) avoids orphan entries when a custom agent is deleted:
+ * deleting the agent also removes its args entry.
+ */
+export interface AgentHubConfig {
+  version: 1
+  /** User-defined custom agents (persisted across restarts). */
+  customAgents: AgentDefinition[]
+  /**
+   * Per-agent startup args keyed by agent id (e.g. { "claude": "--model opus" }).
+   * Applied to both built-in and custom agents at detection time.
+   */
+  agentArgs: Record<string, string>
+  updatedAt: string
+}
+
+export function createDefaultAgentHubConfig(): AgentHubConfig {
+  return { version: 1, customAgents: [], agentArgs: {}, updatedAt: new Date().toISOString() }
 }
 
 // ── IPC payload types ──────────────────────────────────────────────────────

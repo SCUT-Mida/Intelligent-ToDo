@@ -8,6 +8,7 @@ import { AGENT_IPC, PTY_STREAM } from '../shared/agentHub'
 import type {
   AgentDescriptor,
   AgentHubData,
+  AgentHubConfig,
   LaunchPayload,
   LaunchResult,
   AgentProbeResult
@@ -115,6 +116,10 @@ const agentHub = {
   getSessions: (): Promise<AgentHubData> => ipcRenderer.invoke(AGENT_IPC.GET_SESSIONS),
   /** Persist all sessions to disk. */
   saveSessions: (data: AgentHubData): Promise<boolean> => ipcRenderer.invoke(AGENT_IPC.SAVE_SESSIONS, data),
+  /** Load the Agent Hub configuration (custom agents + per-agent args). */
+  getAgentConfig: (): Promise<AgentHubConfig> => ipcRenderer.invoke(AGENT_IPC.GET_AGENT_CONFIG),
+  /** Persist the Agent Hub configuration. */
+  saveAgentConfig: (cfg: AgentHubConfig): Promise<boolean> => ipcRenderer.invoke(AGENT_IPC.SAVE_AGENT_CONFIG, cfg),
   /** Launch an agent in a system terminal window at the given workDir. */
   launch: (payload: LaunchPayload): Promise<LaunchResult> => ipcRenderer.invoke(AGENT_IPC.LAUNCH, payload),
   /** Show OS folder picker; returns selected path or null. */
@@ -125,9 +130,20 @@ const agentHub = {
   getRepoIndex: (): Promise<unknown> => ipcRenderer.invoke(AGENT_IPC.GET_REPO_INDEX),
 
   // ── Embedded PTY (terminal inside the app window) ──
-  /** Create a PTY session for embedded terminal. Returns true on success. */
-  createTerminal: (sessionId: string, command: string, workDir: string, cols: number, rows: number): Promise<boolean> =>
-    ipcRenderer.invoke(AGENT_IPC.PTY_CREATE, sessionId, command, workDir, cols, rows),
+  /**
+   * Create a PTY session for embedded terminal. Returns true on success.
+   * `args` is an OPTIONAL last parameter: extra CLI args (space-separated
+   * string) appended to the resolved spawn command. Omit/empty for no args.
+   */
+  createTerminal: (
+    sessionId: string,
+    command: string,
+    workDir: string,
+    cols: number,
+    rows: number,
+    args?: string
+  ): Promise<boolean> =>
+    ipcRenderer.invoke(AGENT_IPC.PTY_CREATE, sessionId, command, workDir, cols, rows, args),
   /** Send keyboard input to a PTY. */
   sendInput: (sessionId: string, data: string): Promise<void> =>
     ipcRenderer.invoke(AGENT_IPC.PTY_INPUT, sessionId, data),

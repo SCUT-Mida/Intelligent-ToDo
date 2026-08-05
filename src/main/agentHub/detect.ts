@@ -15,7 +15,7 @@
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { BUILTIN_AGENTS } from '../../shared/agentHub'
-import type { AgentDescriptor } from '../../shared/agentHub'
+import type { AgentDescriptor, AgentDefinition } from '../../shared/agentHub'
 import { which } from '../repoNav/which'
 import { logger } from '../logger'
 
@@ -61,23 +61,51 @@ function findInUserDirs(command: string): string | null {
 }
 
 /**
- * Detect all built-in agents. Returns AgentDescriptor[] with `detected` and
- * `resolvedPath` filled in. Never throws — detection failures become
- * `detected: false`.
+ * Detect all agents (built-in + custom). Returns AgentDescriptor[] with
+ * `detected` and `resolvedPath` filled in. Never throws — detection failures
+ * become `detected: false`.
+ *
+ * @param extraAgents custom agent definitions from AgentHubConfig.customAgents.
+ *   Detected alongside built-ins. On an id collision with a built-in, the
+ *   custom agent wins (it is iterated first and deduped by id).
+ * @param agentArgs per-agent startup args from AgentHubConfig.agentArgs, keyed
+ *   by agent id. When present for an agent, it is resolved into the returned
+ *   descriptor's `args` field (the UI display source). Applies to both
+ *   built-in and custom agents.
  *
  * Detection order:
  *   1. which() — where.exe PATH lookup + repoNav known paths
  *   2. User-level bin dirs — npm/cargo/pipx install locations
  */
-export async function detectAgents(): Promise<AgentDescriptor[]> {
+export async function detectAgents(
+  extraAgents: AgentDefinition[] = [],
+  agentArgs: Record<string, string> = {}
+): Promise<AgentDescriptor[]> {
   const results: AgentDescriptor[] = []
 
-  for (const def of BUILTIN_AGENTS) {
+  // Start with custom agents so they win on id collision with built-ins,
+  // then append built-ins that weren't already claimed.
+  const seen = new Set<string>()
+  const allAgents: AgentDefinition[] = []
+  for (const agent of [...extraAgents, ...BUILTIN_AGENTS]) {
+    if (!seen.has(agent.id)) {
+      seen.add(agent.id)
+      allAgents.push(agent)
+    }
+  }
+
+  for (const def of allAgents) {
+    const resolvedArgs = agentArgs[def.id]
     try {
       // Strategy 1: standard which() (where.exe + repoNav known paths)
       const probe = await which(def.command)
       if (probe.ok) {
-        results.push({ ...def, detected: true, resolvedPath: probe.path })
+        results.push({
+          ...def,
+          detected: true,
+          resolvedPath: probe.path,
+          ...(resolvedArgs ? { args: resolvedArgs } : {})
+        })
         logger.info('agentHub:detect', `found ${def.command}`, { path: probe.path, via: probe.via })
         continue
       }
@@ -86,19 +114,24 @@ export async function detectAgents(): Promise<AgentDescriptor[]> {
       // Critical for packaged Electron where PATH is sanitized.
       const userPath = findInUserDirs(def.command)
       if (userPath) {
-        results.push({ ...def, detected: true, resolvedPath: userPath })
+        results.push({
+          ...def,
+          detected: true,
+          resolvedPath: userPath,
+          ...(resolvedArgs ? { args: resolvedArgs } : {})
+        })
         logger.info('agentHub:detect', `found ${def.command} in user dirs`, { path: userPath, via: 'user-bin' })
         continue
       }
 
-      results.push({ ...def, detected: false })
+      results.push({ ...def, detected: false, ...(resolvedArgs ? { args: resolvedArgs } : {}) })
       logger.info('agentHub:detect', `${def.command} not found`, { error: probe.error })
     } catch (err) {
       // Defensive — which() shouldn't throw, but guard anyway.
       logger.warn('agentHub:detect', `detection threw for ${def.command}`, {
         error: err instanceof Error ? err.message : String(err)
       })
-      results.push({ ...def, detected: false })
+      results.push({ ...def, detected: false, ...(resolvedArgs ? { args: resolvedArgs } : {}) })
     }
   }
 
