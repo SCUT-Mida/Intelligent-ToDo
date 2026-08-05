@@ -7,7 +7,7 @@ import MarkdownEditor from '../../components/AgentHub/MarkdownEditor'
 import type { MarkdownHandle } from '../../components/AgentHub/MarkdownEditor'
 import TerminalView from '../../components/AgentHub/TerminalView'
 import type { TerminalHandle } from '../../components/AgentHub/TerminalView'
-import type { AgentSession, AgentDescriptor, AgentHubData, SessionHistoryEntry } from '@shared/agentHub'
+import type { AgentSession, AgentDescriptor, AgentDefinition, AgentHubData, AgentHubConfig, SessionHistoryEntry } from '@shared/agentHub'
 import { createDefaultAgentHubData } from '@shared/agentHub'
 import '../../styles/agentHub.css'
 
@@ -165,6 +165,26 @@ export default function AgentHubApp(): JSX.Element {
     })()
   }, [])
 
+  // Refresh agents list when the settings modal closes, so changes made in the
+  // Agent Hub settings tab (agent args, custom agents) are reflected without
+  // requiring a manual rescan. Skips the initial mount (handled by init effect).
+  const skipFirstSettingsClose = useRef(true)
+  useEffect(() => {
+    if (state.settingsOpen) return
+    if (skipFirstSettingsClose.current) {
+      skipFirstSettingsClose.current = false
+      return
+    }
+    void (async () => {
+      try {
+        const fresh = await window.agentHub.listAgents()
+        setAgents(fresh)
+      } catch {
+        // non-fatal — keep the stale list
+      }
+    })()
+  }, [state.settingsOpen])
+
   // Check for pendingAgentHubWorkDir (cross-app jump from RepoNav).
   // The jump ALWAYS opens the interactive dialog — the last-used agent is
   // preselected via initialAgentId={selectedAgentId} so the user can pick any
@@ -313,11 +333,10 @@ export default function AgentHubApp(): JSX.Element {
 
   const handleRescan = useCallback(async (): Promise<void> => {
     try {
+      // listAgents() now returns built-in + persisted custom agents merged in
+      // the main process, so a plain refresh is enough — no manual re-merge.
       const fresh = await window.agentHub.listAgents()
-      setAgents((prev) => {
-        const customs = prev.filter((a) => a.id.startsWith('custom-'))
-        return [...fresh, ...customs]
-      })
+      setAgents(fresh)
     } catch (err: unknown) {
       console.error('Failed to rescan agents', err)
     }
@@ -329,18 +348,32 @@ export default function AgentHubApp(): JSX.Element {
     try {
       const result = await window.agentHub.probeAgent(trimmed)
       if (!result.ok) return false
-      const customDescriptor: AgentDescriptor = {
-        id: `custom-${trimmed}`,
+      const id = `custom-${trimmed}`
+      const newAgent: AgentDefinition = {
+        id,
         name: trimmed,
         icon: '⚡',
         command: trimmed,
         description: '自定义',
-        outputMode: 'generic',
-        detected: true,
-        resolvedPath: result.resolvedPath
+        outputMode: 'generic'
       }
-      setAgents((prev) => [...prev.filter((a) => a.id !== customDescriptor.id), customDescriptor])
-      setSelectedAgentId(customDescriptor.id)
+      // Persist to config so the custom agent survives restart. Previously
+      // custom agents were in-memory only, which broke sessions referencing
+      // `custom-<command>` ids after the app was closed and reopened.
+      const config = await window.agentHub.getAgentConfig()
+      if (!config.customAgents.some((a) => a.id === id)) {
+        const updated: AgentHubConfig = {
+          ...config,
+          customAgents: [...config.customAgents, newAgent],
+          updatedAt: new Date().toISOString()
+        }
+        await window.agentHub.saveAgentConfig(updated)
+      }
+      // Refresh the agents list — main now returns the merged result so the
+      // new custom agent appears with detection + args applied.
+      const fresh = await window.agentHub.listAgents()
+      setAgents(fresh)
+      setSelectedAgentId(id)
       return true
     } catch {
       return false
@@ -433,6 +466,7 @@ export default function AgentHubApp(): JSX.Element {
                           <TerminalView
                             sessionId={s.id}
                             command={agent?.command ?? s.agentId}
+                            args={agent?.args}
                             workDir={s.workDir}
                             active={isActive}
                             ref={(handle) => {

@@ -3,13 +3,15 @@ import { useAppContext } from '../store/AppContext'
 import GeneralSettings from './GeneralSettings'
 import TodoSettings from './TodoSettings'
 import RepoNavSettings from './RepoNavSettings'
+import AgentHubSettings from './AgentHubSettings'
 
-type SettingsTab = 'general' | 'todo' | 'repoNav'
+type SettingsTab = 'general' | 'todo' | 'repoNav' | 'agentHub'
 
 const TABS: Array<{ id: SettingsTab; label: string; icon: string }> = [
   { id: 'general', label: '通用', icon: '⚙️' },
   { id: 'todo', label: '智能代办', icon: '📋' },
-  { id: 'repoNav', label: '仓库导航', icon: '🧭' }
+  { id: 'repoNav', label: '仓库导航', icon: '🧭' },
+  { id: 'agentHub', label: 'Agent Hub', icon: '🤖' }
 ]
 
 /**
@@ -68,6 +70,9 @@ export default function UnifiedSettingsModal(): JSX.Element {
             )}
             {activeTab === 'repoNav' && (
               <RepoNavSettings />
+            )}
+            {activeTab === 'agentHub' && (
+              <AgentHubSettings />
             )}
           </div>
         </div>

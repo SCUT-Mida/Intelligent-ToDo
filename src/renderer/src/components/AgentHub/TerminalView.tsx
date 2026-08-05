@@ -14,6 +14,8 @@ interface TerminalViewProps {
   sessionId: string
   /** Agent command to spawn (e.g. 'claude', 'hermes'). */
   command: string
+  /** Optional startup args appended to the command (space-separated string). */
+  args?: string
   /** Working directory for the PTY. */
   workDir: string
   /** Whether this terminal panel is the currently visible one. */
@@ -40,7 +42,7 @@ interface TerminalViewProps {
  * ANSI colors, cursor movement — everything works because it's a real PTY.
  */
 const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function TerminalView(
-  { sessionId, command, workDir, active, onExit, onPasted }: TerminalViewProps,
+  { sessionId, command, args, workDir, active, onExit, onPasted }: TerminalViewProps,
   ref
 ): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -133,7 +135,7 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
     // ── Spawn PTY in main process ──
     const cols = term.cols || 80
     const rows = term.rows || 24
-    window.agentHub.createTerminal(sessionId, command, workDir, cols, rows)
+    window.agentHub.createTerminal(sessionId, command, workDir, cols, rows, args)
 
     // ── Connect: terminal keyboard input → PTY stdin ──
     const dataDisposable = term.onData((data: string) => {
@@ -261,6 +263,11 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
       term.dispose()
       terminalRef.current = null
     }
+    // NOTE: `args` is deliberately excluded from deps. The PTY should be
+    // created with the args that were set when the session was activated —
+    // NOT restarted when the user later changes args in settings. This
+    // mirrors the onPastedRef pattern above (exclude from deps to avoid
+    // PTY recreation). New sessions get the latest args via a fresh mount.
   }, [sessionId, command, workDir, onExit])
 
   // Scroll to the latest output when the panel becomes visible again. Panels
