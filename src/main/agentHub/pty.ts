@@ -10,6 +10,7 @@
  */
 
 import type { WebContents } from 'electron'
+import { execFileSync } from 'child_process'
 import { join, dirname } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { PTY_STREAM } from '../../shared/agentHub'
@@ -66,14 +67,14 @@ function safeSend(sender: WebContents, channel: string, ...args: unknown[]): voi
  *
  * Strategy (tries each in order, first match wins):
  *
- * 1. **Parse .cmd shim → direct node spawn**: npm-installed CLI tools on
- *    Windows create .cmd wrapper files. We parse them to extract the actual
- *    `node script.js` invocation, then spawn node DIRECTLY in the PTY.
- *    This bypasses cmd.exe entirely, giving TUI apps (opencode, claude, etc.)
- *    the raw PTY connection they need for keyboard input.
+ * 1. **where.exe PATH lookup**: searches the actual PATH for the command,
+ *    exactly like detect.ts's which() does. Most reliable strategy — catches
+ *    tools regardless of install location. Found .cmd shims are parsed;
+ *    .exe files are spawned directly.
  *
- * 2. **Direct .exe spawn**: if the command is or resolves to a .exe, spawn
- *    it directly.
+ * 2. **Hardcoded bin dirs**: searches common Windows install locations
+ *    (npm global, cargo, .local/bin, WindowsApps) for .cmd shims or .exe
+ *    files. Critical fallback when PATH is sanitized in packaged Electron.
  *
  * 3. **cmd.exe /c fallback**: last resort for unknown command types.
  */
@@ -83,7 +84,46 @@ function buildSpawnTarget(command: string): { file: string; args: string[] } {
     return { file: command, args: [] }
   }
 
-  // Search common Windows bin dirs for the command.
+  // If already an absolute path to a .cmd, parse it directly.
+  if (/\.cmd$/i.test(command) && existsSync(command)) {
+    const parsed = parseNpmCmdShim(command)
+    if (parsed) {
+      logger.info('agentHub:pty', `parsed absolute .cmd: ${command} → ${parsed.file}`)
+      return parsed
+    }
+  }
+
+  // Strategy 1: where.exe PATH lookup (most reliable — searches actual PATH).
+  // This mirrors detect.ts's which() strategy and catches tools regardless
+  // of install location. Critical because the hardcoded bin dirs below may
+  // miss tools installed in non-standard locations.
+  if (process.platform === 'win32') {
+    try {
+      const stdout = execFileSync('where', [command], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      })
+      const paths = stdout.split(/\r?\n/).map((p) => p.trim()).filter(Boolean)
+      for (const p of paths) {
+        if (/\.cmd$/i.test(p)) {
+          const parsed = parseNpmCmdShim(p)
+          if (parsed) {
+            logger.info('agentHub:pty', `resolved via where.exe: ${command} → ${parsed.file}`)
+            return parsed
+          }
+        } else if (/\.exe$/i.test(p) && existsSync(p)) {
+          logger.info('agentHub:pty', `resolved via where.exe: ${command} → ${p}`)
+          return { file: p, args: [] }
+        }
+      }
+    } catch {
+      // where.exe didn't find it — fall through to hardcoded bin dirs
+    }
+  }
+
+  // Strategy 2: search common Windows bin dirs for the command.
   const binDirs = [
     join(process.env.APPDATA ?? '', 'npm'),
     join(process.env.USERPROFILE ?? '', '.cargo', 'bin'),
@@ -101,6 +141,9 @@ function buildSpawnTarget(command: string): { file: string; args: string[] } {
         logger.info('agentHub:pty', `parsed .cmd shim: ${command} → ${parsed.file} ${parsed.args.join(' ')}`)
         return parsed
       }
+      // .cmd exists but parse failed — log for diagnosability instead of
+      // silently continuing to the next dir.
+      logger.warn('agentHub:pty', `found .cmd but parse returned null: ${cmdPath}`)
     }
     // Also try .exe
     const exePath = join(dir, command + '.exe')
@@ -152,6 +195,11 @@ function parseNpmCmdShim(cmdPath: string): { file: string; args: string[] } | nu
       if (existsSync(exePath)) {
         return { file: exePath, args: [] }
       }
+      // .exe referenced in .cmd but doesn't exist on disk — this happens
+      // during tool updates (the .exe is being replaced) or when the .cmd
+      // uses a conditional (IF EXIST node.exe) that didn't match. Log it
+      // so the failure is diagnosable instead of silently falling through.
+      logger.warn('agentHub:pty', `.cmd shim .exe target missing: ${cmdPath} → ${exePath}`)
     }
 
     // Case 2: find a .js script and pair it with a node executable.
@@ -162,8 +210,18 @@ function parseNpmCmdShim(cmdPath: string): { file: string; args: string[] } | nu
         // Look for a node.exe reference in the .cmd file.
         const nodeMatch = content.match(/"([^"]*node[^"]*\.exe)"/i)
         const nodeExe = nodeMatch ? resolveVars(nodeMatch[1]) : 'node'
+        // npm shims reference %dp0%\node.exe but it only exists when node was
+        // installed INTO the npm dir (rare). Normally node.exe lives in the
+        // system install dir and the .cmd falls back to bare 'node' on PATH.
+        // We must mirror that fallback — using a non-existent node.exe path
+        // causes spawn to fail with "File not found".
+        if (nodeExe !== 'node' && !existsSync(nodeExe)) {
+          logger.warn('agentHub:pty', `.cmd shim node.exe missing, using bare 'node': ${cmdPath} → ${nodeExe}`)
+          return { file: 'node', args: [scriptPath] }
+        }
         return { file: nodeExe, args: [scriptPath] }
       }
+      logger.warn('agentHub:pty', `.cmd shim .js script missing: ${cmdPath} → ${scriptPath}`)
     }
 
     return null
@@ -173,6 +231,55 @@ function parseNpmCmdShim(cmdPath: string): { file: string; args: string[] } | nu
     })
     return null
   }
+}
+
+/**
+ * Build the environment for a PTY process.
+ *
+ * Augments `process.env.PATH` with common user-level bin directories.
+ * This is CRITICAL for packaged Electron: the GUI process inherits a
+ * sanitized PATH that often excludes user-level bin dirs added by
+ * npm/pipx/cargo installers. Without this augmentation:
+ *   - The `cmd.exe /c` fallback can't find the agent command
+ *   - Bare `'node'` (from parseNpmCmdShim's node fallback) can't be found
+ *   - Any spawned process relying on PATH breaks
+ *
+ * Dirs already in PATH are not duplicated.
+ */
+function buildPtyEnv(): Record<string, string> {
+  const env = { ...process.env } as Record<string, string>
+
+  // Common Windows user-level bin directories — same set as buildSpawnTarget
+  // and detect.ts, kept in sync.
+  const extraDirs = [
+    join(process.env.APPDATA ?? '', 'npm'),
+    join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Python'),
+    join(process.env.USERPROFILE ?? '', '.cargo', 'bin'),
+    join(process.env.USERPROFILE ?? '', '.local', 'bin'),
+    join(process.env.LOCALAPPDATA ?? '', 'Microsoft', 'WindowsApps')
+  ].filter((d) => d && existsSync(d))
+
+  if (extraDirs.length > 0) {
+    const currentPath = env.PATH ?? ''
+    const currentLower = currentPath.toLowerCase().split(';').map((p) => p.trim().replace(/\\/g, '/'))
+    const missing = extraDirs.filter((d) => {
+      const normalized = d.toLowerCase().replace(/\\/g, '/')
+      return !currentLower.includes(normalized)
+    })
+    if (missing.length > 0) {
+      env.PATH = currentPath
+        ? currentPath + ';' + missing.join(';')
+        : missing.join(';')
+      logger.info('agentHub:pty', 'augmented PATH for PTY', { added: missing.length })
+    }
+  }
+
+  // Terminal env vars for proper ANSI/color support in ConPTY.
+  env.TERM = 'xterm-256color'
+  env.COLORTERM = 'truecolor'
+  env.FORCE_COLOR = '1'
+
+  return env
 }
 
 /**
@@ -214,12 +321,7 @@ export function createPty(
       cols,
       rows,
       cwd: workDir || undefined,
-      env: {
-        ...process.env,
-        TERM: 'xterm-256color',
-        COLORTERM: 'truecolor',
-        FORCE_COLOR: '1'
-      } as Record<string, string>
+      env: buildPtyEnv()
     }) as IPty
 
     const session: PtySession = { pty: proc, sessionId }
