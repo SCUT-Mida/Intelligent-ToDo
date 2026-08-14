@@ -9,6 +9,33 @@ export interface TerminalHandle {
   paste: (text: string, submit?: boolean) => boolean
 }
 
+/**
+ * Intercept OSC 52 (clipboard set) escape sequences from TUI apps.
+ *
+ * TUI apps (opencode, claude, vim, tmux, etc.) copy text to the clipboard
+ * via OSC 52: `ESC ] 52 ; c ; <base64-text> BEL` (or ST = ESC \).
+ *
+ * xterm.js does NOT handle OSC 52 by default — no clipboard provider is
+ * available in the browser context. Without this interception, TUI apps
+ * show "copied" but the OS clipboard stays empty.
+ *
+ * Scans the data for OSC 52 sequences, decodes the base64 payload, writes
+ * to the OS clipboard via the main-process IPC, and returns the data with
+ * the sequences stripped (so xterm.js doesn't render them as visible garbage).
+ */
+const OSC_52_RE = /\x1b\]52;[cp];([A-Za-z0-9+/=]*)(?:\x07|\x1b\\)/g
+function interceptOsc52(data: string, writeClipboard: (text: string) => void): string {
+  if (!data.includes('\x1b]52;')) return data // fast-path: no OSC 52 at all
+  return data.replace(OSC_52_RE, (_match, b64: string) => {
+    if (b64) {
+      try {
+        writeClipboard(atob(b64))
+      } catch { /* invalid base64 — ignore */ }
+    }
+    return '' // strip the OSC 52 sequence
+  })
+}
+
 interface TerminalViewProps {
   /** Unique session id — used to match PTY data events. */
   sessionId: string
@@ -143,9 +170,16 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
     })
 
     // ── Connect: PTY stdout → terminal display ──
+    // OSC 52 interception: TUI apps copy via OSC 52 escape sequences. xterm.js
+    // ignores them (no clipboard provider), so we intercept BEFORE writing to
+    // the terminal, decode the base64 payload, and write to the OS clipboard
+    // via main-process IPC. The stripped sequence is then written to xterm.js.
     const unsubData = window.agentHub.onTerminalData((sid: string, data: string) => {
       if (sid === sessionId && terminalRef.current) {
-        terminalRef.current.write(data)
+        const processed = interceptOsc52(data, (text) => {
+          window.agentHub.writeClipboard(text)
+        })
+        terminalRef.current.write(processed)
       }
     })
 
@@ -199,6 +233,18 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
     // The text is injected via term.paste() so line endings and bracketed-paste
     // markers are handled identically to the 'paste' event path below.
     const onKeyDownCapture = (e: KeyboardEvent): void => {
+      // Copy: Ctrl+C / Ctrl+Shift+C when there's a selection. Without a
+      // selection, Ctrl+C falls through to xterm.js → PTY as SIGINT.
+      // xterm.js renders on canvas (not DOM text), so the browser's native
+      // copy-selected-text doesn't work — we must handle it ourselves.
+      const isCopyChord = (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'c'
+      if (isCopyChord && term.hasSelection()) {
+        e.preventDefault()
+        e.stopPropagation()
+        window.agentHub.writeClipboard(term.getSelection())
+        return
+      }
+
       const isPasteChord = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'v'
       if (!isPasteChord) return
       e.preventDefault()
