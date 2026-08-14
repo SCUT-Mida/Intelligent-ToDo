@@ -161,6 +161,56 @@ function buildSpawnTarget(command: string): { file: string; args: string[] } {
 }
 
 /**
+ * Resolve bare `'node'` to an absolute path.
+ *
+ * node-pty's spawn on Windows uses CreateProcess with lpApplicationName, which
+ * does NOT search PATH. A bare `'node'` would fail with "File not found".
+ * We must resolve it to an absolute path before spawning.
+ *
+ * Strategy:
+ * 1. where.exe node — searches actual PATH (most reliable)
+ * 2. Common Node.js install dirs (Program Files\nodejs, etc.)
+ * 3. Last resort: bare 'node' (will likely fail but error is logged)
+ */
+function resolveNodeExe(): string {
+  // Strategy 1: where.exe (searches PATH — works even in packaged Electron
+  // because where.exe itself is in System32 which is always on PATH)
+  if (process.platform === 'win32') {
+    try {
+      const stdout = execFileSync('where', ['node'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      })
+      const path = stdout.split(/\r?\n/)[0]?.trim()
+      if (path && existsSync(path)) {
+        return path
+      }
+    } catch {
+      // node not on PATH — fall through to common dirs
+    }
+  }
+
+  // Strategy 2: common Node.js install locations
+  const commonNodePaths = [
+    join(process.env.ProgramFiles ?? '', 'nodejs', 'node.exe'),
+    join(process.env['ProgramFiles(x86)'] ?? '', 'nodejs', 'node.exe'),
+    join(process.env.LOCALAPPDATA ?? '', 'Programs', 'nodejs', 'node.exe')
+  ]
+  for (const p of commonNodePaths) {
+    if (p && existsSync(p)) {
+      return p
+    }
+  }
+
+  // Last resort: bare 'node' (node-pty will likely fail, but the error
+  // message in createPty's catch will at least show what happened)
+  logger.warn('agentHub:pty', 'could not resolve node.exe path, using bare node')
+  return 'node'
+}
+
+/**
  * Parse an npm .cmd shim file to extract the actual executable.
  *
  * Handles two common formats:
@@ -216,8 +266,11 @@ function parseNpmCmdShim(cmdPath: string): { file: string; args: string[] } | nu
         // We must mirror that fallback — using a non-existent node.exe path
         // causes spawn to fail with "File not found".
         if (nodeExe !== 'node' && !existsSync(nodeExe)) {
-          logger.warn('agentHub:pty', `.cmd shim node.exe missing, using bare 'node': ${cmdPath} → ${nodeExe}`)
-          return { file: 'node', args: [scriptPath] }
+          // node-pty's spawn uses CreateProcess with lpApplicationName which
+          // does NOT search PATH — bare 'node' would fail. Resolve to abs path.
+          const resolvedNode = resolveNodeExe()
+          logger.warn('agentHub:pty', `.cmd shim node.exe missing, resolved node: ${cmdPath} → ${resolvedNode}`)
+          return { file: resolvedNode, args: [scriptPath] }
         }
         return { file: nodeExe, args: [scriptPath] }
       }
