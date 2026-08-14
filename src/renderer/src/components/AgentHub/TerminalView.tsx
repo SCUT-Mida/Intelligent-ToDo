@@ -233,18 +233,6 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
     // The text is injected via term.paste() so line endings and bracketed-paste
     // markers are handled identically to the 'paste' event path below.
     const onKeyDownCapture = (e: KeyboardEvent): void => {
-      // Copy: Ctrl+C / Ctrl+Shift+C when there's a selection. Without a
-      // selection, Ctrl+C falls through to xterm.js → PTY as SIGINT.
-      // xterm.js renders on canvas (not DOM text), so the browser's native
-      // copy-selected-text doesn't work — we must handle it ourselves.
-      const isCopyChord = (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'c'
-      if (isCopyChord && term.hasSelection()) {
-        e.preventDefault()
-        e.stopPropagation()
-        window.agentHub.writeClipboard(term.getSelection())
-        return
-      }
-
       const isPasteChord = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'v'
       if (!isPasteChord) return
       e.preventDefault()
@@ -290,8 +278,22 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
           })
       }
     }
+    // Right-click copy: if there's a text selection, copy it to the clipboard.
+    // This mirrors Windows Terminal / PuTTY behavior. xterm.js renders on canvas
+    // so the browser's native copy-selected-text doesn't work — we must handle
+    // it ourselves. Ctrl+C is NOT used for copy (too easy to accidentally send
+    // SIGINT and kill the agent process when the selection was inadvertently
+    // cleared between selecting and pressing Ctrl+C).
+    const onContextMenu = (e: MouseEvent): void => {
+      if (term.hasSelection()) {
+        e.preventDefault()
+        window.agentHub.writeClipboard(term.getSelection())
+        term.clearSelection()
+      }
+    }
     container.addEventListener('paste', onPasteCapture, true)
     container.addEventListener('keydown', onKeyDownCapture, true)
+    container.addEventListener('contextmenu', onContextMenu)
 
     // ── Focus terminal for immediate interaction ──
     term.focus()
@@ -300,6 +302,7 @@ const TerminalView = forwardRef<TerminalHandle, TerminalViewProps>(function Term
     return () => {
       container.removeEventListener('paste', onPasteCapture, true)
       container.removeEventListener('keydown', onKeyDownCapture, true)
+      container.removeEventListener('contextmenu', onContextMenu)
       resizeObserver.disconnect()
       resizeDisposable.dispose()
       dataDisposable.dispose()
