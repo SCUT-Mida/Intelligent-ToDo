@@ -10,10 +10,14 @@ import { registerAgentHubIpc } from './agentHub'
 import { killAllPtys } from './agentHub/pty'
 import { scanAiConfigs } from './aiConfigScanner'
 import { AI_IPC } from '../shared/aiConfig'
+import { extractJson } from '../shared/jsonUtils'
 import { logger } from './logger'
 import { netFetch } from './netFetch'
 import type { NetResponse } from './netFetch'
-import { ENC_PREFIX, encryptApiKey, decryptApiKey } from './crypto'
+import { callLLM } from './aiClient'
+import { getRecentTokenUsage, flushTokenUsage } from './tokenMeter'
+import type { TokenUsageDay } from './tokenMeter'
+import { encryptApiKey, decryptApiKey } from './crypto'
 
 // ── Single-instance lock + GPU cache cleanup ───────────────────────────────
 // Prevents Windows error "Unable to move the cache: 拒绝访问 (0x5)" at startup.
@@ -155,36 +159,21 @@ function saveData(data: AppData): void {
 }
 
 /**
- * Extract a JSON object from an LLM response that may be wrapped in markdown
- * code fences or surrounded by prose. Returns the parsed value or null.
- */
-function extractJson(content: string): unknown | null {
-  if (!content) return null
-  // Strip markdown code fences ```json ... ``` or ``` ... ```
-  const fenceMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const candidate = fenceMatch ? fenceMatch[1] : content
-  // Find the first '{' and matching last '}'
-  const start = candidate.indexOf('{')
-  const end = candidate.lastIndexOf('}')
-  if (start === -1 || end === -1 || end <= start) return null
-  const slice = candidate.slice(start, end + 1)
-  try {
-    return JSON.parse(slice)
-  } catch {
-    return null
-  }
-}
-
-/**
  * Build the prompt and call an OpenAI-compatible chat completions endpoint.
  * Returns a structured AiPriorityResult with task references + summary.
+ *
+ * v1.22: the transport (streaming SSE, retry-with-backoff, token usage)
+ * moved into callLLM (src/main/aiClient.ts). This function keeps the
+ * Todo-specific semantics: prompt construction, 60s hard timeout,
+ * slow-response warnings, and the __CANCELLED__ sentinel for user cancels.
  */
 async function aiRecommend(
   tasks: Task[],
   config: AppConfig,
   holidayOverrides?: Record<number, YearHolidayData>,
   opts?: { companyLastSaturday?: boolean; taskCount?: number },
-  externalSignal?: AbortSignal
+  externalSignal?: AbortSignal,
+  onDelta?: (text: string) => void
 ): Promise<AiPriorityResult> {
   if (!config.apiUrl || !config.apiKey || !config.model) {
     throw new Error('请先在配置页面填写完整的 AI 配置（URL、Key、Model）')
@@ -279,34 +268,17 @@ async function aiRecommend(
     '}\n\n' +
     '注意：taskId 字段必须精确匹配上方任务列表中 [ID: xxx] 的值，不要编造 ID。'
 
-  // ── Build request body ──
-  const requestBody = {
-    model: config.model,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt }
-    ],
-    temperature: 0.6,
-    stream: false
-  }
-  const bodyStr = JSON.stringify(requestBody)
-
-  // Log the full request (URL + model + prompt lengths + body structure)
-  // for debugging "works in other tools but not here" issues.
+  // ── Send via callLLM (streaming + retry + usage live there) ──
   logger.info('aiRecommend', 'LLM request sending', {
     url,
     model: config.model,
-    temperature: requestBody.temperature,
+    temperature: 0.6,
     systemPromptLength: systemPrompt.length,
     userPromptLength: userPrompt.length,
-    totalBodySize: bodyStr.length,
-    systemPromptPreview: systemPrompt.slice(0, 200),
-    userPromptPreview: userPrompt.slice(0, 500),
-    taskCount: incomplete.length
+    taskCount: incomplete.length,
+    streaming: Boolean(onDelta)
   })
 
-  // Timeout + external cancel support.
-  const controller = new AbortController()
   const HARD_TIMEOUT_MS = 60000
 
   // Intermediate "slow response" warnings — logged but don't abort.
@@ -318,84 +290,67 @@ async function aiRecommend(
     logger.warn('aiRecommend', 'response taking >30s, consider canceling and switching models')
   }, 30000)
 
-  const timeout = setTimeout(() => controller.abort(), HARD_TIMEOUT_MS)
-  if (externalSignal) {
-    if (externalSignal.aborted) controller.abort()
-    else externalSignal.addEventListener('abort', () => controller.abort(), { once: true })
-  }
-
-  let resp: NetResponse
   const fetchStartTime = Date.now()
+  let content: string
+  let usage:
+    | { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+    | undefined
   try {
-    resp = await netFetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`
-      },
-      body: bodyStr,
-      signal: controller.signal
+    const result = await callLLM({
+      apiUrl: config.apiUrl,
+      apiKey: config.apiKey,
+      model: config.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.6,
+      timeoutMs: HARD_TIMEOUT_MS,
+      signal: externalSignal,
+      usageSource: 'todo-recommend',
+      onDelta
     })
-  } catch (fetchErr) {
-    clearTimeout(timeout)
+    content = result.content
+    usage = result.usage
+      ? {
+          prompt_tokens: result.usage.promptTokens,
+          completion_tokens: result.usage.completionTokens,
+          total_tokens: result.usage.totalTokens
+        }
+      : undefined
+  } catch (err) {
     clearTimeout(slowWarn1)
     clearTimeout(slowWarn2)
     const elapsed = Date.now() - fetchStartTime
-    if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
-      const isUserCancel = externalSignal?.aborted
-      if (isUserCancel) {
-        logger.info('aiRecommend', 'request canceled by user', { elapsedMs: elapsed })
-        throw new Error('__CANCELLED__')
-      }
-      logger.error('aiRecommend', 'request timeout', { elapsedMs: elapsed, timeoutMs: HARD_TIMEOUT_MS })
-      throw new Error(
-        `AI 响应超时（${Math.round(elapsed / 1000)} 秒未返回）。` +
-        '这通常说明模型不兼容或服务端有问题。建议：\n' +
-        '1. 在设置中更换一个模型（如换成 glm-4.6 或 deepseek-chat）\n' +
-        '2. 检查网络连接\n' +
-        '3. 查看日志（设置 → 诊断日志）了解完整请求/响应详情'
-      )
+    if (err instanceof Error && err.name === 'AbortError') {
+      // callLLM only re-throws the raw AbortError for external (user) cancels;
+      // its own timeouts were already translated to a Chinese message.
+      logger.info('aiRecommend', 'request canceled by user', { elapsedMs: elapsed })
+      throw new Error('__CANCELLED__')
     }
-    logger.error('aiRecommend', 'fetch failed', {
-      error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
+    logger.error('aiRecommend', 'LLM call failed', {
+      error: err instanceof Error ? err.message : String(err),
       elapsedMs: elapsed,
       url
     })
-    throw new Error(`AI 请求失败：${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`)
+    throw err
   }
-  clearTimeout(timeout)
   clearTimeout(slowWarn1)
   clearTimeout(slowWarn2)
   const fetchDuration = Date.now() - fetchStartTime
-
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '')
-    logger.error('aiRecommend', 'API returned error', {
-      status: resp.status,
-      responseBody: text.slice(0, 500),
-      durationMs: fetchDuration
-    })
-    throw new Error(`AI 请求失败 (${resp.status}): ${text.slice(0, 300)}`)
-  }
-
-  const json = (await resp.json()) as {
-    choices?: { message?: { content?: string } }[]
-    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
-  }
-  const content = json.choices?.[0]?.message?.content
-  const usage = json.usage
 
   // Log the full response for debugging.
   logger.info('aiRecommend', 'LLM response received', {
     durationMs: fetchDuration,
     contentLength: content?.length ?? 0,
     contentPreview: content?.slice(0, 1000) ?? '(empty)',
-    usage: usage ? {
-      promptTokens: usage.prompt_tokens,
-      completionTokens: usage.completion_tokens,
-      totalTokens: usage.total_tokens
-    } : undefined,
-    finishReason: (json.choices?.[0] as Record<string, unknown>)?.finish_reason
+    usage: usage
+      ? {
+          promptTokens: usage.prompt_tokens,
+          completionTokens: usage.completion_tokens,
+          totalTokens: usage.total_tokens
+        }
+      : undefined
   })
   if (!content) {
     throw new Error('AI 返回内容为空')
@@ -798,16 +753,40 @@ app.whenReady().then(() => {
   ipcMain.handle(
     'ai:recommend',
     async (
-      _e,
+      e,
       tasks: Task[],
       config: AppConfig,
       holidayOverrides?: Record<number, YearHolidayData>,
-      opts?: { companyLastSaturday?: boolean }
+      opts?: { companyLastSaturday?: boolean; taskCount?: number }
     ) => {
       // Create a fresh AbortController so the renderer can cancel via ai:cancel.
       aiAbortController = new AbortController()
+      // Throttle delta pushes: char-level SSE deltas are coalesced and the
+      // FULL accumulated text is sent at most every 120ms (the renderer just
+      // replaces its preview text, so full-text semantics keep it simple).
+      let acc = ''
+      let lastSend = 0
+      let flushTimer: NodeJS.Timeout | null = null
+      const flush = (): void => {
+        flushTimer = null
+        lastSend = Date.now()
+        if (!e.sender.isDestroyed()) e.sender.send('ai:recommend:delta', acc)
+      }
+      const onDelta = (text: string): void => {
+        acc += text
+        if (flushTimer) return
+        const wait = Math.max(0, 120 - (Date.now() - lastSend))
+        flushTimer = setTimeout(flush, wait)
+      }
       try {
-        const result = await aiRecommend(tasks, config, holidayOverrides, opts, aiAbortController.signal)
+        const result = await aiRecommend(
+          tasks,
+          config,
+          holidayOverrides,
+          opts,
+          aiAbortController.signal,
+          onDelta
+        )
         logger.info('aiRecommend', 'completed successfully', {
           itemsReturned: result.items.length
         })
@@ -818,6 +797,7 @@ app.whenReady().then(() => {
         })
         throw err
       } finally {
+        if (flushTimer) clearTimeout(flushTimer)
         aiAbortController = null
       }
     }
@@ -833,6 +813,64 @@ app.whenReady().then(() => {
     }
     return false
   })
+
+  // Token usage summary for the Settings panel (last 7 days by default).
+  ipcMain.handle('ai:getTokenUsage', (_e, daysCount?: number): { days: TokenUsageDay[] } => {
+    return { days: getRecentTokenUsage(Math.min(Math.max(daysCount ?? 7, 1), 30)) }
+  })
+
+  // Generate a short AgentHub session title from the first prompt sent to a
+  // session (borrowed from dsh's LLM-generated session titles). Fails soft:
+  // any missing config / LLM error resolves to null so the caller can keep
+  // the rule-based title silently.
+  ipcMain.handle(
+    'ai:generateSessionTitle',
+    async (_e, req: { agentName: string; workDir: string; firstPrompt: string }): Promise<string | null> => {
+      try {
+        const { data } = loadData()
+        const config = data.config
+        if (!config.apiUrl || !config.apiKey || !config.model) return null
+        if (!req.firstPrompt?.trim()) return null
+
+        const systemPrompt =
+          '你是一个会话命名助手。根据用户发给编程 CLI 助手的第一条消息，生成一个简短的中文会话标题。' +
+          '只返回标题本身：不超过 16 个字，不要以标点结尾，不要加引号，不要任何解释。'
+        const userPrompt =
+          `助手：${req.agentName}\n` +
+          `工作目录：${req.workDir}\n` +
+          `第一条消息：${req.firstPrompt.slice(0, 500)}\n\n标题：`
+
+        const result = await callLLM({
+          apiUrl: config.apiUrl,
+          apiKey: config.apiKey,
+          model: config.model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          temperature: 0.3,
+          maxTokens: 32,
+          timeoutMs: 20000,
+          usageSource: 'agent-title'
+        })
+
+        const title = result.content
+          .replace(/^["'「『]+'"?/, '')
+          .replace(/["'」』]+$/, '')
+          .replace(/[。.!！?？~～]+$/, '')
+          .trim()
+          .split('\n')[0]
+          ?.trim()
+        if (!title) return null
+        return title.slice(0, 24)
+      } catch (err) {
+        logger.info('ai:generateSessionTitle', 'skipped', {
+          error: err instanceof Error ? err.message : String(err)
+        })
+        return null
+      }
+    }
+  )
   ipcMain.handle('holidays:fetch', (_e, year: number) => fetchHolidays(year))
   ipcMain.handle(
     'md:export',
@@ -950,6 +988,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   try { killAllPtys() } catch { /* non-fatal */ }
+  try { flushTokenUsage() } catch { /* non-fatal */ }
 })
 
 process.on('exit', (code) => {

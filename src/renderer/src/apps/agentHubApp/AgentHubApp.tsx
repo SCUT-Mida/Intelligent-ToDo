@@ -94,6 +94,9 @@ export default function AgentHubApp(): JSX.Element {
   const activeSessionIdRef = useRef(activeSessionId)
   activeSessionIdRef.current = activeSessionId
 
+  const agentsRef = useRef(agents)
+  agentsRef.current = agents
+
   // Embedded terminal handles, keyed by session id (for send-to-terminal).
   // The terminal stays mounted per session (v1.14.x PTY-persistence pattern).
   const terminalRefs = useRef(new Map<string, TerminalHandle>())
@@ -219,6 +222,9 @@ export default function AgentHubApp(): JSX.Element {
       const newSession: AgentSession = {
         id: `sess-${Date.now().toString(36)}`,
         title,
+        // 'rule' marks the heuristic title as replaceable by the LLM
+        // auto-title on the session's first prompt (v1.22).
+        titleKind: 'rule',
         agentId,
         workDir,
         createdAt: new Date().toISOString(),
@@ -283,6 +289,30 @@ export default function AgentHubApp(): JSX.Element {
       // Flag for persistence — without this the new entry would never be
       // written to disk (the persist effect only saves when flagged).
       pendingSaveRef.current++
+
+      // v1.22 auto-title: the first prompt of a still-rule-titled session
+      // asks the LLM for a short title (fire-and-forget; silent on failure
+      // or when no AI config exists — the rule title stays).
+      if (session && session.titleKind === 'rule') {
+        const agentName =
+          agentsRef.current.find((a) => a.id === session.agentId)?.name ?? session.agentId
+        void window.api
+          .generateSessionTitle(agentName, session.workDir, content)
+          .then((title) => {
+            if (!title) return
+            setSessions((prev) =>
+              prev.map((s) =>
+                s.id === sessionId && s.titleKind === 'rule'
+                  ? { ...s, title, titleKind: 'auto', updatedAt: new Date().toISOString() }
+                  : s
+              )
+            )
+            pendingSaveRef.current++
+          })
+          .catch(() => {
+            /* silent — keep the rule-based title */
+          })
+      }
     },
     []
   )
@@ -318,7 +348,11 @@ export default function AgentHubApp(): JSX.Element {
 
   const handleRenameSession = useCallback((id: string, title: string): void => {
     setSessions((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, title, updatedAt: new Date().toISOString() } : s))
+      prev.map((s) =>
+        s.id === id
+          ? { ...s, title, titleKind: 'manual', updatedAt: new Date().toISOString() }
+          : s
+      )
     )
     pendingSaveRef.current++
   }, [])

@@ -108,7 +108,13 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
           })
         }
         try {
-          const entries = await generateMemoryEntries(index.repos, config, aiConfig)
+          const entries = await generateMemoryEntries(index.repos, config, aiConfig, (p) => {
+            try {
+              if (!sender.isDestroyed()) {
+                sender.send('repoNav:memoryProgress', p)
+              }
+            } catch { /* ignore send errors */ }
+          })
           const memory: RepoMemory = {
             version: 1,
             generatedAt: new Date().toISOString(),
@@ -237,8 +243,9 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
   })
 
   // ── REGENERATE_MEMORY: full AI description regeneration ───────────────
-  ipc.handle(IPC_V2.REPO_REGENERATE_MEMORY, async () => {
+  ipc.handle(IPC_V2.REPO_REGENERATE_MEMORY, async (event) => {
     try {
+      const sender = event.sender
       const config = getConfig()
       const index = await scanRepos(config)
       const aiConfig = getAIConfig()
@@ -258,7 +265,13 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
           hint: '请先在「设置 → 仓库导航 → 扫描配置」添加扫描根目录，然后点「刷新」.'
         }
       }
-      const entries = await generateMemoryEntries(index.repos, config, aiConfig)
+      const entries = await generateMemoryEntries(index.repos, config, aiConfig, (p) => {
+        try {
+          if (!sender.isDestroyed()) {
+            sender.send('repoNav:memoryProgress', p)
+          }
+        } catch { /* ignore send errors */ }
+      })
       const memory: RepoMemory = {
         version: 1,
         generatedAt: new Date().toISOString(),

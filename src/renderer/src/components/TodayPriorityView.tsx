@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Task, DailyPriority } from '@shared/types'
 import { getQuadrantMeta } from '@shared/types'
 import ProgressSteps from './ProgressSteps'
@@ -62,6 +62,17 @@ export default function TodayPriorityView({
   const [tab, setTab] = useState<'today' | 'history'>('today')
   const [expandedDate, setExpandedDate] = useState<string | null>(null)
   const [taskCount, setTaskCount] = useState(5)
+  // Streaming preview text of the running AI analysis (full accumulated text
+  // pushed from main, throttled). Reset when a new analysis starts.
+  const [streamText, setStreamText] = useState('')
+
+  useEffect(() => {
+    const unsub = window.api.onAiRecommendDelta((text) => setStreamText(text))
+    return unsub
+  }, [])
+  useEffect(() => {
+    if (aiState.kind === 'loading') setStreamText('')
+  }, [aiState.kind])
 
   const taskMap = new Map(tasks.map((t) => [t.id, t]))
   const todayHasItems = !!todayPriority && todayPriority.items.length > 0
@@ -103,6 +114,7 @@ export default function TodayPriorityView({
                 taskMap={taskMap}
                 todayHasItems={todayHasItems}
                 taskCount={taskCount}
+                streamText={streamText}
                 onRegenerate={onRegenerate}
                 onCancel={onCancel}
                 onTogglePriorityItem={onTogglePriorityItem}
@@ -180,6 +192,8 @@ interface TodayTabProps {
   taskMap: Map<string, Task>
   todayHasItems: boolean
   taskCount: number
+  /** Streaming preview of the running analysis ('' when not streaming). */
+  streamText: string
   onRegenerate: (taskCount?: number) => void
   onCancel: () => void
   onTogglePriorityItem: (taskId: string) => void
@@ -196,6 +210,7 @@ function TodayTab({
   taskMap,
   todayHasItems,
   taskCount,
+  streamText,
   onRegenerate,
   onCancel,
   onTogglePriorityItem,
@@ -208,6 +223,11 @@ function TodayTab({
       <div className="priority-panel__loading">
         <div className="spinner" />
         <div>AI 正在分析你的任务，请稍候...</div>
+        {streamText && (
+          <pre className="priority-panel__stream" aria-label="AI 输出预览">
+            {streamText.length > 1500 ? '…' + streamText.slice(-1500) : streamText}
+          </pre>
+        )}
       </div>
     )
   }

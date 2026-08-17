@@ -20,6 +20,7 @@ import { readFileSync, writeFileSync, existsSync, renameSync } from 'fs'
 import { join } from 'path'
 import { callLLM } from '../aiClient'
 import type { RepoEntry, RepoNavConfig, RepoMemory, RepoMemoryEntry } from '../../shared/repoNav'
+import { extractJsonArray } from '../../shared/jsonUtils'
 import { dataFilePath, migrateFromLegacy } from './paths'
 import { logger } from '../logger'
 
@@ -136,26 +137,8 @@ function buildRepoContextBatch(repos: RepoEntry[]): string {
 }
 
 // ── JSON extraction ────────────────────────────────────────────────────────
-
-/**
- * Extract a JSON array from an LLM response that may be wrapped in markdown
- * code fences or surrounded by prose. Returns the parsed array or null.
- */
-function extractJsonArray(content: string): unknown[] | null {
-  if (!content) return null
-  const fenceMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const candidate = fenceMatch ? fenceMatch[1] : content
-  const start = candidate.indexOf('[')
-  const end = candidate.lastIndexOf(']')
-  if (start === -1 || end === -1 || end <= start) return null
-  const slice = candidate.slice(start, end + 1)
-  try {
-    const parsed = JSON.parse(slice)
-    return Array.isArray(parsed) ? parsed : null
-  } catch {
-    return null
-  }
-}
+// extractJsonArray now lives in src/shared/jsonUtils.ts (shared with the
+// todo-priority flow in main/index.ts).
 
 // ── Main entry point ───────────────────────────────────────────────────────
 
@@ -169,11 +152,15 @@ function extractJsonArray(content: string): unknown[] | null {
  * Processes repos in batches of config.memoryBatchSize (default 5).
  * All repos always appear in the output; per-repo LLM failures result in
  * description: null + tags: [].
+ *
+ * @param onProgress optional callback fired after each batch with
+ *                   { current: repos covered so far, total }.
  */
 export async function generateMemoryEntries(
   repos: RepoEntry[],
   config: RepoNavConfig,
-  aiConfig: { apiUrl: string; apiKey: string; model: string }
+  aiConfig: { apiUrl: string; apiKey: string; model: string },
+  onProgress?: (p: { current: number; total: number }) => void
 ): Promise<RepoMemoryEntry[]> {
   const batchSize = config.memoryBatchSize ?? 5
   const results: RepoMemoryEntry[] = []
@@ -233,7 +220,8 @@ export async function generateMemoryEntries(
           { role: 'user', content: userPrompt }
         ],
         temperature: 0.3,
-        timeoutMs: 60000
+        timeoutMs: 60000,
+        usageSource: 'repo-memory'
       })
 
       const parsed = extractJsonArray(result.content)
@@ -266,6 +254,7 @@ export async function generateMemoryEntries(
     }
 
     results.push(...batchEntries)
+    onProgress?.({ current: Math.min(i + batchSize, repos.length), total: repos.length })
   }
 
   logger.info('aiMemory', 'generateMemoryEntries done', {

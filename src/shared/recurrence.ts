@@ -40,8 +40,10 @@ export function computeNextOccurrence(rec: TaskRecurrence, from: Date = new Date
   // ── Monthly ──
   if (rec.type === 'monthly' && rec.monthDay) {
     const target = rec.monthDay
-    // Try next month first, then the month after (handles months with fewer days)
-    for (let offset = 1; offset <= 2; offset++) {
+    // Try the current month first (there may still be a valid occurrence
+    // later this month), then the next two months (handles months with
+    // fewer days than `target`).
+    for (let offset = 0; offset <= 2; offset++) {
       const m = new Date(from.getFullYear(), from.getMonth() + offset, 1)
       const daysInMonth = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate()
       const day = Math.min(target, daysInMonth)

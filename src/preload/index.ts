@@ -41,6 +41,26 @@ const api = {
   ): Promise<AiPriorityResult> =>
     ipcRenderer.invoke('ai:recommend', tasks, config, holidayOverrides, opts),
   cancelAiRecommend: (): Promise<boolean> => ipcRenderer.invoke('ai:cancel'),
+  /**
+   * Subscribe to streaming text deltas of a running ai:recommend call.
+   * The payload is the FULL accumulated text so far (throttled in main);
+   * replace any preview text with it.
+   */
+  onAiRecommendDelta: (cb: (fullTextSoFar: string) => void): (() => void) => {
+    const handler = (_e: unknown, text: string): void => cb(text)
+    ipcRenderer.on('ai:recommend:delta', handler)
+    return () => ipcRenderer.removeListener('ai:recommend:delta', handler as never)
+  },
+  /** Token usage summary (last N days, default 7) for the Settings panel. */
+  getTokenUsage: (daysCount?: number): Promise<{ days: Array<{ date: string; total: number; bySource: Record<string, number> }> }> =>
+    ipcRenderer.invoke('ai:getTokenUsage', daysCount),
+  /**
+   * Generate a short session title from the first prompt (AgentHub auto
+   * titles). Resolves null on missing config / any failure — callers keep
+   * the current title silently.
+   */
+  generateSessionTitle: (agentName: string, workDir: string, firstPrompt: string): Promise<string | null> =>
+    ipcRenderer.invoke('ai:generateSessionTitle', { agentName, workDir, firstPrompt }),
   fetchHolidays: (year: number): Promise<YearHolidayData> =>
     ipcRenderer.invoke('holidays:fetch', year),
   exportMarkdown: (content: string, defaultName: string): Promise<boolean> =>
@@ -77,6 +97,12 @@ const repoNav = {
     const handler = (_e: unknown, p: { current: number; total: number; name: string }): void => cb(p)
     ipcRenderer.on('repoNav:scanProgress', handler)
     return () => ipcRenderer.removeListener('repoNav:scanProgress', handler as never)
+  },
+  /** Batch progress of AI memory generation ({ current, total } in repos). */
+  onMemoryProgress: (cb: (p: { current: number; total: number }) => void): (() => void) => {
+    const handler = (_e: unknown, p: { current: number; total: number }): void => cb(p)
+    ipcRenderer.on('repoNav:memoryProgress', handler)
+    return () => ipcRenderer.removeListener('repoNav:memoryProgress', handler as never)
   },
   loadCachedIndex: (): Promise<RepoIndex | null> => ipcRenderer.invoke(IPC.LOAD_CACHED_INDEX),
   openRepo: (repoPath: string, command: string, mode: 'new-tab' | 'new-window'): Promise<OpenRepoResult> =>

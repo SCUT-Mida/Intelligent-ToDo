@@ -919,6 +919,25 @@ select {
   font-size: 14px;
 }
 
+/* Streaming preview of the running AI analysis (v1.22). */
+.priority-panel__stream {
+  width: 100%;
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  text-align: left;
+}
+
 .priority-panel__error {
   background: var(--danger-soft);
   color: var(--danger);
@@ -2876,6 +2895,12 @@ select {
   text-align: center;
 }
 
+.ai-memory-wizard__batch {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .ai-memory-wizard__bar {
   width: 100%;
   height: 6px;
@@ -4210,4 +4235,75 @@ select {
   background: #fafbfc;
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+/* ── Token usage card (v1.22) ───────────────────────────────────────────── */
+
+.token-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.token-usage__total {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.token-usage__bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.token-usage__bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.token-usage__bar-date {
+  width: 36px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.token-usage__bar-track {
+  flex: 1;
+  height: 8px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.token-usage__bar-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 999px;
+  transition: width 0.3s;
+}
+
+.token-usage__bar-value {
+  width: 64px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.token-usage__sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.token-usage__chip {
+  padding: 2px 8px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-radius: 999px;
+  font-size: 11px;
 }

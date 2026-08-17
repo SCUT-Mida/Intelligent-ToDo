@@ -55,10 +55,15 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
     { stage: 'idle' } | { stage: 'opening' } | { stage: 'success' } | { stage: 'error'; message: string }
   >({ stage: 'idle' })
 
+  // Token usage (v1.22): last 7 days, per day + per source.
+  const [tokenUsage, setTokenUsage] = useState<Array<{ date: string; total: number; bySource: Record<string, number> }> | null>(null)
+
   useEffect(() => {
     setAppStatus(window.api.getAppStatus())
     // Fetch the log file path for display.
     window.api.getLogPath().then(setLogPathHint).catch(() => setLogPathHint('(未知)'))
+    // Fetch token usage summary (best-effort).
+    window.api.getTokenUsage().then((r) => setTokenUsage(r.days)).catch(() => setTokenUsage(null))
     const unsub = window.api.onUpdateEvent((e) => {
       if (e.stage === 'checking') setUpdateState({ stage: 'checking' })
       else if (e.stage === 'available') setUpdateState({ stage: 'available', version: e.version, notes: e.notes })
@@ -478,6 +483,11 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
         </div>
       </Section>
 
+      {/* 用量统计 */}
+      <Section title="AI 用量统计" icon="📊" label="用量" defaultOpen={false}>
+        <TokenUsageCard days={tokenUsage} />
+      </Section>
+
       {/* Config add/edit modal */}
       {configModalOpen && (
         <div className="overlay" onMouseDown={() => setConfigModalOpen(false)}>
@@ -556,6 +566,71 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
           )}
         </div>
       </Section>
+    </div>
+  )
+}
+
+// ── Token usage card ────────────────────────────────────────────────────────
+
+/** Friendly labels for the token meter's source keys. */
+const USAGE_SOURCE_LABELS: Record<string, string> = {
+  'todo-recommend': '今日优先分析',
+  'repo-memory': '仓库 AI 记忆',
+  'agent-title': '会话自动标题',
+  'agent-task': 'Agent 任务'
+}
+
+function formatDayShort(dateStr: string): string {
+  const parts = dateStr.split('-')
+  if (parts.length !== 3) return dateStr
+  return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`
+}
+
+/**
+ * Last-7-days token consumption, per day and per AI feature. Purely
+ * informational — helps users understand what the AI features cost.
+ */
+function TokenUsageCard({ days }: { days: Array<{ date: string; total: number; bySource: Record<string, number> }> | null }): JSX.Element {
+  if (days === null) {
+    return <div className="field__hint">用量数据加载失败。</div>
+  }
+  const grandTotal = days.reduce((acc, d) => acc + d.total, 0)
+  if (grandTotal === 0) {
+    return <div className="field__hint">近 7 天暂无 AI 调用记录。</div>
+  }
+  const maxDay = Math.max(...days.map((d) => d.total), 1)
+  return (
+    <div className="token-usage">
+      <div className="token-usage__total">
+        近 7 天累计 <b>{grandTotal.toLocaleString()}</b> tokens
+      </div>
+      <div className="token-usage__bars">
+        {days.map((d) => (
+          <div key={d.date} className="token-usage__bar-row" title={`${d.date}：${d.total.toLocaleString()} tokens`}>
+            <span className="token-usage__bar-date">{formatDayShort(d.date)}</span>
+            <div className="token-usage__bar-track">
+              <div className="token-usage__bar-fill" style={{ width: `${Math.round((d.total / maxDay) * 100)}%` }} />
+            </div>
+            <span className="token-usage__bar-value">{d.total > 0 ? d.total.toLocaleString() : ''}</span>
+          </div>
+        ))}
+      </div>
+      <div className="token-usage__sources">
+        {Object.entries(
+          days.reduce<Record<string, number>>((acc, d) => {
+            for (const [src, n] of Object.entries(d.bySource)) {
+              acc[src] = (acc[src] ?? 0) + n
+            }
+            return acc
+          }, {})
+        )
+          .sort((a, b) => b[1] - a[1])
+          .map(([src, n]) => (
+            <span key={src} className="token-usage__chip">
+              {USAGE_SOURCE_LABELS[src] ?? src} {n.toLocaleString()}
+            </span>
+          ))}
+      </div>
     </div>
   )
 }

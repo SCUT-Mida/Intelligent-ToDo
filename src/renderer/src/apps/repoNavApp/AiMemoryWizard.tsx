@@ -39,6 +39,15 @@ export default function AiMemoryWizard({ onSuccess, onClose }: AiMemoryWizardPro
   const [errorKind, setErrorKind] = useState<ErrorKind>('unknown')
   const [hint, setHint] = useState<string | null>(null)
   const [status, setStatus] = useState('准备中...')
+  // Batch progress pushed from main while generating ({ current, total } repos).
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
+
+  // Subscribe to per-batch progress events while generating (v1.22).
+  useEffect(() => {
+    if (step !== 'generating') return
+    setProgress(null)
+    return window.repoNav.onMemoryProgress((p) => setProgress(p))
+  }, [step])
 
   const handleGenerate = useCallback(async (): Promise<void> => {
     setStep('generating')
@@ -99,9 +108,24 @@ export default function AiMemoryWizard({ onSuccess, onClose }: AiMemoryWizardPro
             <div className="ai-memory-wizard__progress">
               <div className="spinner" />
               <div className="ai-memory-wizard__status">{status}</div>
-              <div className="ai-memory-wizard__bar">
-                <div className="ai-memory-wizard__bar-fill ai-memory-wizard__bar-fill--indeterminate" />
-              </div>
+              {progress && progress.total > 0 && (
+                <>
+                  <div className="ai-memory-wizard__batch">
+                    仓库进度：{Math.min(progress.current, progress.total)} / {progress.total}
+                  </div>
+                  <div className="ai-memory-wizard__bar">
+                    <div
+                      className="ai-memory-wizard__bar-fill"
+                      style={{ width: `${Math.min(100, Math.round((progress.current / progress.total) * 100))}%` }}
+                    />
+                  </div>
+                </>
+              )}
+              {(!progress || progress.total === 0) && (
+                <div className="ai-memory-wizard__bar">
+                  <div className="ai-memory-wizard__bar-fill ai-memory-wizard__bar-fill--indeterminate" />
+                </div>
+              )}
             </div>
           )}
 

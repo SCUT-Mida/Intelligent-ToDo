@@ -1,8 +1,8 @@
 {
   "name": "intelligent-todo",
   "productName": "Intelligent-ToDo",
-  "version": "1.0.0",
-  "description": "智能化代办 - Smart Todo with Eisenhower matrix and AI prioritization",
+  "version": "1.22.0",
+  "description": "本地AI工具集 - Smart Todo, Repo Navigator & Agent Hub desktop suite",
   "main": "./out/main/index.js",
   "author": "intelligent-todo",
   "private": true,
@@ -15,7 +15,10 @@
     "gen:icon": "node scripts/generate-icon.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
-    "typecheck:web": "tsc --noEmit -p tsconfig.web.json"
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint src tests"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.14",
@@ -34,9 +37,11 @@
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
+    "oxlint": "^1.78.0",
     "sharp": "^0.35.3",
     "to-ico": "^1.1.5",
     "typescript": "^5.5.3",
-    "vite": "^5.4.0"
+    "vite": "^5.4.0",
+    "vitest": "^4.1.10"
   }
 }

@@ -17,6 +17,140 @@ export interface NetResponse {
   text: () => Promise<string>
 }
 
+/**
+ * Streaming variant of NetResponse for SSE / chunked responses.
+ * `chunks` yields decoded UTF-8 text pieces as they arrive; `text()`
+ * resolves with the full body once the stream ends.
+ */
+export interface NetStreamResponse {
+  ok: boolean
+  status: number
+  chunks: AsyncIterable<string>
+  text: () => Promise<string>
+}
+
+/**
+ * Streaming fetch — like netFetch but exposes body chunks as they arrive
+ * (needed for SSE). UTF-8 is decoded with a streaming TextDecoder so
+ * multi-byte characters split across chunk boundaries stay intact.
+ *
+ * The request is aborted (and the iterator ends) if `signal` fires.
+ */
+export function netFetchStream(
+  url: string,
+  options: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal } = {}
+): Promise<NetStreamResponse> {
+  return new Promise((resolve, reject) => {
+    const request = net.request({ method: options.method ?? 'GET', url })
+
+    if (options.headers) {
+      for (const [key, value] of Object.entries(options.headers)) {
+        request.setHeader(key, value)
+      }
+    }
+
+    const onAbort = (): void => request.abort()
+    if (options.signal) {
+      if (options.signal.aborted) {
+        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }))
+        return
+      }
+      options.signal.addEventListener('abort', onAbort, { once: true })
+    }
+
+    request.on('response', (response) => {
+      const status = response.statusCode
+      const decoder = new TextDecoder('utf-8')
+      // Full-body accumulation (for text()) — bounded by callers' max_tokens.
+      let full = ''
+      let done = false
+      let failure: Error | null = null
+      const queue: string[] = []
+      let waiter: (() => void) | null = null
+      let fullWaiters: Array<() => void> = []
+
+      const settleWaiters = (): void => {
+        const w = waiter
+        waiter = null
+        if (w) w()
+      }
+
+      response.on('data', (chunk: Buffer) => {
+        const text = decoder.decode(chunk, { stream: true })
+        if (!text) return
+        full += text
+        queue.push(text)
+        settleWaiters()
+      })
+      response.on('end', () => {
+        // Flush any pending bytes (multi-byte tails) into the stream.
+        const tail = decoder.decode()
+        if (tail) {
+          full += tail
+          queue.push(tail)
+        }
+        done = true
+        if (options.signal) options.signal.removeEventListener('abort', onAbort)
+        settleWaiters()
+        const waiters = fullWaiters
+        fullWaiters = []
+        for (const w of waiters) w()
+      })
+      response.on('error', (err: Error) => {
+        failure = err
+        done = true
+        if (options.signal) options.signal.removeEventListener('abort', onAbort)
+        settleWaiters()
+        const waiters = fullWaiters
+        fullWaiters = []
+        for (const w of waiters) w()
+      })
+
+      const chunks: AsyncIterable<string> = {
+        async *[Symbol.asyncIterator](): AsyncIterator<string> {
+          for (;;) {
+            while (queue.length > 0) {
+              const item = queue.shift()
+              if (item !== undefined) yield item
+            }
+            if (done) {
+              if (failure) throw failure
+              return
+            }
+            await new Promise<void>((r) => {
+              waiter = r
+            })
+          }
+        }
+      }
+
+      resolve({
+        ok: status >= 200 && status < 300,
+        status,
+        chunks,
+        text: () =>
+          done
+            ? Promise.resolve(full)
+            : new Promise<string>((res, rej) => {
+                fullWaiters.push(() => (failure ? rej(failure) : res(full)))
+              })
+      })
+    })
+
+    request.on('error', (err: Error) => {
+      if (options.signal) options.signal.removeEventListener('abort', onAbort)
+      if (options.signal?.aborted) {
+        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }))
+      } else {
+        reject(err)
+      }
+    })
+
+    if (options.body) request.write(options.body)
+    request.end()
+  })
+}
+
 export function netFetch(
   url: string,
   options: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal } = {}

@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/oxlint/configuration-schema.json",
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2022": true
+  },
+  "rules": {
+    "no-console": "off"
+  },
+  "ignorePatterns": ["node_modules", "out", "release", "dist", "vendor", "scripts"]
+}
