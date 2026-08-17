@@ -3,11 +3,13 @@ import { useAppContext } from '../../store/AppContext'
 import SessionSidebar from '../../components/AgentHub/SessionSidebar'
 import NewSessionDialog from '../../components/AgentHub/NewSessionDialog'
 import SessionHistoryDialog from '../../components/AgentHub/SessionHistoryDialog'
+import TaskRunDialog from '../../components/AgentHub/TaskRunDialog'
+import TaskTimeline from '../../components/AgentHub/TaskTimeline'
 import MarkdownEditor from '../../components/AgentHub/MarkdownEditor'
 import type { MarkdownHandle } from '../../components/AgentHub/MarkdownEditor'
 import TerminalView from '../../components/AgentHub/TerminalView'
 import type { TerminalHandle } from '../../components/AgentHub/TerminalView'
-import type { AgentSession, AgentDescriptor, AgentDefinition, AgentHubData, AgentHubConfig, SessionHistoryEntry } from '@shared/agentHub'
+import type { AgentSession, AgentDescriptor, AgentDefinition, AgentHubData, AgentHubConfig, SessionHistoryEntry, TaskEvent, TaskRunInfo, SessionSearchHit } from '@shared/agentHub'
 import { createDefaultAgentHubData } from '@shared/agentHub'
 import '../../styles/agentHub.css'
 
@@ -76,6 +78,21 @@ export default function AgentHubApp(): JSX.Element {
   const [histories, setHistories] = useState<Record<string, SessionHistoryEntry[]>>({})
   // Session whose history dialog is currently open (null = closed)
   const [historySessionId, setHistorySessionId] = useState<string | null>(null)
+
+  // ── Structured tasks (v1.23) ──────────────────────────────────────────
+  // Per-session structured event log (loaded from main; appended live).
+  const [sessionEvents, setSessionEvents] = useState<Record<string, TaskEvent[]>>({})
+  // Live/recent runs from the main registry.
+  const [taskRuns, setTaskRuns] = useState<TaskRunInfo[]>([])
+  // Session whose task-run dialog is open (null = closed).
+  const [taskDialogSessionId, setTaskDialogSessionId] = useState<string | null>(null)
+  // Pre-filled prompt for the next opened task dialog (cross-app hand-off).
+  const [taskDialogPrefill, setTaskDialogPrefill] = useState<string | undefined>(undefined)
+  // Per-session right-pane tab: interactive terminal vs structured timeline.
+  const [sessionTabs, setSessionTabs] = useState<Record<string, 'terminal' | 'tasks'>>({})
+  // Cross-session search.
+  const [searchResults, setSearchResults] = useState<SessionSearchHit[] | null>(null)
+  const [searching, setSearching] = useState(false)
 
   // Dialog state
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false)
@@ -187,6 +204,44 @@ export default function AgentHubApp(): JSX.Element {
       }
     })()
   }, [state.settingsOpen])
+
+  // ── Structured tasks: load persisted event logs + subscribe to live ones ──
+  useEffect(() => {
+    if (loading || sessions.length === 0) return
+    void (async () => {
+      try {
+        const entries = await Promise.all(
+          sessions.map(async (s) => [s.id, await window.agentHub.getSessionEvents(s.id)] as const)
+        )
+        setSessionEvents((prev) => {
+          const next = { ...prev }
+          for (const [id, events] of entries) next[id] = events
+          return next
+        })
+      } catch (err) {
+        console.error('Failed to load session event logs', err)
+      }
+    })()
+  }, [loading, sessions.length])
+
+  useEffect(() => {
+    // Live events: append to the session's timeline if we know the session.
+    const unsubEvents = window.agentHub.onTaskEvent((sessionId, event) => {
+      setSessionEvents((prev) => {
+        if (!prev[sessionId]) return prev // unknown session — skip until reload
+        return { ...prev, [sessionId]: [...prev[sessionId], event] }
+      })
+    })
+    const unsubDone = window.agentHub.onTaskDone(() => {
+      // Refresh the runs registry (running counts drive tab badges etc.).
+      window.agentHub.listTasks().then(setTaskRuns).catch(() => { /* non-fatal */ })
+    })
+    window.agentHub.listTasks().then(setTaskRuns).catch(() => { /* non-fatal */ })
+    return () => {
+      unsubEvents()
+      unsubDone()
+    }
+  }, [])
 
   // Check for pendingAgentHubWorkDir (cross-app jump from RepoNav).
   // The jump ALWAYS opens the interactive dialog — the last-used agent is
@@ -376,6 +431,87 @@ export default function AgentHubApp(): JSX.Element {
     }
   }, [])
 
+  // ── Structured task handlers (v1.23) ──────────────────────────────────
+
+  const handleOpenTaskDialog = useCallback((sessionId: string, prefill?: string): void => {
+    setTaskDialogPrefill(prefill)
+    setTaskDialogSessionId(sessionId)
+  }, [])
+
+  const handleCloseTaskDialog = useCallback((): void => {
+    setTaskDialogSessionId(null)
+    setTaskDialogPrefill(undefined)
+  }, [])
+
+  const handleRunTask = useCallback(
+    async (sessionId: string, prompt: string, background: boolean): Promise<void> => {
+      const session = sessionsRef.current.find((s) => s.id === sessionId)
+      if (!session) return
+      const agent = agentsRef.current.find((a) => a.id === session.agentId) ?? null
+      if (!agent) {
+        console.error('Agent not found for task run', session.agentId)
+        return
+      }
+      try {
+        const result = await window.agentHub.runTask({
+          sessionId,
+          command: agent.command,
+          outputMode: agent.outputMode,
+          args: agent.args,
+          workDir: session.workDir,
+          prompt
+        })
+        if (!result.ok) {
+          console.error('Task run failed to start', result.error)
+          return
+        }
+        // Ensure the timeline tracks this session even if it was never loaded.
+        setSessionEvents((prev) => (prev[sessionId] ? prev : { ...prev, [sessionId]: [] }))
+        handleCloseTaskDialog()
+        if (!background) {
+          setSessionTabs((prev) => ({ ...prev, [sessionId]: 'tasks' }))
+        }
+      } catch (err) {
+        console.error('Task run failed', err)
+      }
+    },
+    [handleCloseTaskDialog]
+  )
+
+  const handleCancelRun = useCallback((runId: string): void => {
+    window.agentHub.cancelTask(runId).catch(() => { /* non-fatal */ })
+  }, [])
+
+  const handleSetSessionTab = useCallback((sessionId: string, tab: 'terminal' | 'tasks'): void => {
+    setSessionTabs((prev) => ({ ...prev, [sessionId]: tab }))
+  }, [])
+
+  // ── Cross-session search (v1.23) ──────────────────────────────────────
+
+  const handleSearch = useCallback((query: string): void => {
+    const q = query.trim()
+    if (q.length < 2) {
+      setSearchResults(null)
+      setSearching(false)
+      return
+    }
+    setSearching(true)
+    window.agentHub
+      .searchSessions(q)
+      .then((hits) => setSearchResults(hits))
+      .catch(() => setSearchResults([]))
+      .finally(() => setSearching(false))
+  }, [])
+
+  const handleSelectSearchResult = useCallback((hit: SessionSearchHit): void => {
+    if (hit.sessionId) {
+      setActiveSessionId(hit.sessionId)
+      if (hit.source !== 'prompt') {
+        setSessionTabs((prev) => ({ ...prev, [hit.sessionId as string]: 'tasks' }))
+      }
+    }
+  }, [])
+
   const handleAddCustomAgent = useCallback(async (command: string): Promise<boolean> => {
     const trimmed = command.trim()
     if (!trimmed) return false
@@ -451,6 +587,10 @@ export default function AgentHubApp(): JSX.Element {
         width={sidebarWidth}
         onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
         onResize={(w) => setSidebarWidth(w)}
+        onSearch={handleSearch}
+        searchResults={searchResults}
+        searching={searching}
+        onSelectResult={handleSelectSearchResult}
       />
 
       <div className="agent-hub__main">
@@ -474,6 +614,10 @@ export default function AgentHubApp(): JSX.Element {
                 {sessions.map((s) => {
                   const isActive = s.id === activeSessionId
                   const agent = agents.find((a) => a.id === s.agentId)
+                  const tab = sessionTabs[s.id] ?? 'terminal'
+                  const runningHere = taskRuns.filter(
+                    (r) => r.sessionId === s.id && r.status === 'running'
+                  ).length
                   return (
                     <div
                       key={s.id}
@@ -497,20 +641,60 @@ export default function AgentHubApp(): JSX.Element {
                       />
                       {s.workDir ? (
                         <div className="agent-hub__terminal-area">
-                          <TerminalView
-                            sessionId={s.id}
-                            command={agent?.command ?? s.agentId}
-                            args={agent?.args}
-                            workDir={s.workDir}
-                            active={isActive}
-                            ref={(handle) => {
-                              if (handle) {
-                                terminalRefs.current.set(s.id, handle)
-                              } else {
-                                terminalRefs.current.delete(s.id)
-                              }
-                            }}
-                          />
+                          <div className="agent-hub__panel-header">
+                            <div className="agent-hub__panel-tabs">
+                              <button
+                                className={`agent-hub__panel-tab ${tab === 'terminal' ? 'agent-hub__panel-tab--active' : ''}`}
+                                onClick={() => handleSetSessionTab(s.id, 'terminal')}
+                              >
+                                终端
+                              </button>
+                              <button
+                                className={`agent-hub__panel-tab ${tab === 'tasks' ? 'agent-hub__panel-tab--active' : ''}`}
+                                onClick={() => handleSetSessionTab(s.id, 'tasks')}
+                              >
+                                任务记录{runningHere > 0 ? ` ⏳${runningHere}` : ''}
+                              </button>
+                            </div>
+                            <button
+                              className="btn btn--ghost agent-hub__panel-run"
+                              onClick={() => handleOpenTaskDialog(s.id)}
+                              title="以非交互方式运行一次性任务（输出解析为结构化时间线）"
+                            >
+                              ▶ 运行任务
+                            </button>
+                          </div>
+                          {/* TerminalView stays MOUNTED across tab switches so
+                              the live PTY session survives (same reason panels
+                              stay mounted across app switches). */}
+                          <div
+                            className="agent-hub__terminal-holder"
+                            style={{ display: tab === 'terminal' ? 'flex' : 'none' }}
+                          >
+                            <TerminalView
+                              sessionId={s.id}
+                              command={agent?.command ?? s.agentId}
+                              args={agent?.args}
+                              workDir={s.workDir}
+                              active={isActive && tab === 'terminal'}
+                              ref={(handle) => {
+                                if (handle) {
+                                  terminalRefs.current.set(s.id, handle)
+                                } else {
+                                  terminalRefs.current.delete(s.id)
+                                }
+                              }}
+                            />
+                          </div>
+                          {tab === 'tasks' && (
+                            <TaskTimeline
+                              sessionId={s.id}
+                              events={sessionEvents[s.id] ?? []}
+                              runs={taskRuns}
+                              onCancelRun={handleCancelRun}
+                              onRerun={() => handleOpenTaskDialog(s.id)}
+                            />
+                          )}
                         </div>
                       ) : (
                         <div className="agent-hub__workdir-prompt">
@@ -557,6 +741,25 @@ export default function AgentHubApp(): JSX.Element {
           onReEdit={(entry) => handleReEdit(historySession.id, entry.content)}
         />
       )}
+
+      {/* Structured task run dialog (v1.23) */}
+      {taskDialogSessionId && (() => {
+        const session = sessions.find((s) => s.id === taskDialogSessionId)
+        if (!session) return null
+        const agent = agents.find((a) => a.id === session.agentId) ?? null
+        return (
+          <TaskRunDialog
+            sessionTitle={session.title}
+            agent={agent}
+            workDir={session.workDir}
+            initialPrompt={taskDialogPrefill}
+            onClose={handleCloseTaskDialog}
+            onRun={(prompt, background) => {
+              void handleRunTask(session.id, prompt, background)
+            }}
+          />
+        )
+      })()}
     </div>
   )
 }

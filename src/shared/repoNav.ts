@@ -203,6 +203,54 @@ export interface RepoNavConfig {
    * Default: 'powershell.exe'.
    */
   terminalFallback?: string
+  /**
+   * Execution approval gate (v1.23, borrowed from dsh's fail-closed
+   * approval + permission presets):
+   *  - 'off':        never confirm — commands run directly (pre-v1.23 behavior)
+   *  - 'dangerous':  confirm only when the command matches a dangerous
+   *                  pattern (default)
+   *  - 'all':        confirm every execution
+   */
+  approvalMode?: 'off' | 'dangerous' | 'all'
+}
+
+// ── Command danger classification (approval gate, v1.23) ────────────────────
+
+/**
+ * Conservative substring/regex patterns for commands that can destroy data
+ * or push history. Deliberately errs toward flagging: a false positive just
+ * costs one confirmation click, a false negative can delete work.
+ * Pure function — unit tested in tests/shared/repoNav.test.ts.
+ */
+const DANGEROUS_PATTERNS: RegExp[] = [
+  /\brm\b/i, // POSIX remove (any flag combination)
+  /\bdel\b/i, // cmd delete
+  /\brmdir\b/i, // cmd remove dir
+  /\brd\s+\/s/i, // cmd recursive remove
+  /remove-item/i, // PowerShell
+  /\bformat\b/i, // disk format
+  /\bmkfs\b/i,
+  /\bshred\b/i,
+  /\btruncate\b/i,
+  /git\s+push\b.*(--force\b|-f\b|--force-with-lease)/i, // history rewrite push
+  /git\s+reset\s+--hard/i,
+  /git\s+clean\b.*(-f|--force)/i,
+  /git\s+checkout\s+--\s/i, // discard working-tree changes
+  /git\s+branch\s+(-D|--delete\s+--force)/i,
+  />\s*\S/i, // output redirection (file overwrite)
+  /\bnpm\s+(uninstall|rm)\b/i,
+  /\bpip\s+uninstall\b/i,
+  /curl\b.*\|\s*(bash|sh|pwsh|powershell)/i, // remote-code pipe
+  /invoke-webrequest.*\|\s*(bash|sh|pwsh|powershell)/i,
+  /\bdocker\s+(rm|rmi|system\s+prune|volume\s+rm|volume\s+prune)\b/i,
+  /\btaskkill\b/i
+]
+
+/** Whether a joined command string should trigger the approval dialog. */
+export function isDangerousCommand(command: string): boolean {
+  const c = command.trim()
+  if (!c) return false
+  return DANGEROUS_PATTERNS.some((re) => re.test(c))
 }
 
 // ── IPC payload types ───────────────────────────────────────────────────────

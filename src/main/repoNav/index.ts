@@ -10,7 +10,7 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { join } from 'path'
 import { readFileSync, existsSync } from 'fs'
 import { execFileSync } from 'child_process'
-import { IPC, IPC_V2 } from '../../shared/repoNav'
+import { IPC, IPC_V2, isDangerousCommand } from '../../shared/repoNav'
 import type { RepoEntry, RepoMemory, RepoIndex, ToolProbeResult } from '../../shared/repoNav'
 import { DEFAULT_TOOL_BINARIES, classifyLlmError } from '../../shared/repoNav'
 import type { ToolKind } from '../../shared/repoNav'
@@ -156,8 +156,16 @@ export function registerRepoNavIpc(ipc: typeof ipcMain): void {
   })
 
   // ── OPEN_REPO: launch terminal for a given repo path ──────────────────
+  // Audit log includes the danger classification (v1.23 approval gate):
+  // the renderer confirms interactively; the main process records what ran.
   ipc.handle(IPC.OPEN_REPO, async (_e: IpcMainInvokeEvent, repoPath: string, command: string, mode: 'new-tab' | 'new-window') => {
-    logger.info('ipc', 'OPEN_REPO', { repoPath, command, mode })
+    logger.info('ipc', 'OPEN_REPO', {
+      repoPath,
+      command,
+      mode,
+      dangerous: isDangerousCommand(command),
+      approvalMode: getConfig().approvalMode ?? 'dangerous'
+    })
     const config = getConfig()
     const result = await openRepoInTerminal(repoPath, command, mode, config)
     // On success, bump the open counter (non-fatal if it fails — the user

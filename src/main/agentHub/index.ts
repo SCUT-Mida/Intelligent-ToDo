@@ -11,18 +11,31 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { execFileSync } from 'child_process'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import { AGENT_IPC } from '../../shared/agentHub'
-import type { AgentHubData, AgentHubConfig, AgentProbeResult, LaunchPayload, LaunchResult } from '../../shared/agentHub'
+import { AGENT_IPC, TASK_IPC } from '../../shared/agentHub'
+import type {
+  AgentHubData,
+  AgentHubConfig,
+  AgentProbeResult,
+  LaunchPayload,
+  LaunchResult,
+  TaskRunRequest,
+  TaskRunStartResult,
+  TaskRunInfo,
+  TaskEvent,
+  SessionSearchHit
+} from '../../shared/agentHub'
 import { detectAgents } from './detect'
 import { loadSessions, saveSessions } from './persistence'
 import { getAgentConfig, saveAgentConfig } from './agentConfig'
 import { createPty, sendInput, resizePty, killPty, killAllPtys } from './pty'
+import { runTask, cancelTask, listTasks, getSessionEvents, cancelAllTasks } from './taskRunner'
+import { searchSessions } from './search'
 import { openRepoInTerminal } from '../repoNav/launcher'
 import { getConfig as getRepoNavConfig } from '../repoNav/config'
 import { logger } from '../logger'
 
 // Re-export for main/index.ts cleanup
-export { killAllPtys }
+export { killAllPtys, cancelAllTasks }
 
 export function registerAgentHubIpc(ipc: typeof ipcMain): void {
   ipc.handle(AGENT_IPC.LIST_AGENTS, async () => {
@@ -147,6 +160,36 @@ export function registerAgentHubIpc(ipc: typeof ipcMain): void {
   // async navigator.clipboard.writeText() can silently fail on Windows).
   ipc.handle(AGENT_IPC.CLIPBOARD_WRITE, (_e, text: string): void => {
     clipboard.writeText(typeof text === 'string' ? text : '')
+  })
+
+  // ── Structured task runs (v1.23) ─────────────────────────────────────────
+  // RUN: spawn a one-shot agent run (non-PTY), parse output into TaskEvents,
+  // append them to the session's JSONL log and push live to the renderer.
+  ipc.handle(TASK_IPC.RUN, (e, req: TaskRunRequest): TaskRunStartResult => {
+    return runTask(e.sender, req)
+  })
+
+  // CANCEL: kill a running task run.
+  ipc.handle(TASK_IPC.CANCEL, (_e, runId: string): boolean => cancelTask(runId))
+
+  // LIST: all tracked runs (running first).
+  ipc.handle(TASK_IPC.LIST, (): TaskRunInfo[] => listTasks())
+
+  // GET_EVENTS: a session's persisted structured event log.
+  ipc.handle(TASK_IPC.GET_EVENTS, (_e, sessionId: string): TaskEvent[] => {
+    return getSessionEvents(sessionId)
+  })
+
+  // SEARCH: local substring search over histories + event logs.
+  ipc.handle(TASK_IPC.SEARCH, (_e, query: string): SessionSearchHit[] => {
+    try {
+      return searchSessions(query, loadSessions())
+    } catch (err) {
+      logger.warn('agentHub:ipc', 'SEARCH failed', {
+        error: err instanceof Error ? err.message : String(err)
+      })
+      return []
+    }
   })
 
   logger.info('agentHub:ipc', 'IPC handlers registered')

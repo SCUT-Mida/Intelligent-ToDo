@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import type { RepoEntry, RepoNavConfig, RepoIndex, RepoUserData } from '@shared/repoNav'
+import { isDangerousCommand } from '@shared/repoNav'
 import RepoCard from './RepoCard'
+import ConfirmDialog from '../ConfirmDialog'
 import { useScanManager } from '../../lib/scanManager'
 import { useAppContext } from '../../store/AppContext'
 
@@ -54,6 +56,13 @@ export default function RepoNavView({
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const [cachedAt, setCachedAt] = useState<string | null>(null)
   const [viewTab, setViewTab] = useState<ViewTab>('all')
+  // Pending approval-gate execution (v1.23): set when a command matched the
+  // approval policy; the ConfirmDialog resolves it.
+  const [pendingApproval, setPendingApproval] = useState<{
+    repo: RepoEntry
+    command: string
+    mode: 'new-tab' | 'new-window'
+  } | null>(null)
   // Scan state is module-level (survives component unmount/remount)
   const { scanState, startScan } = useScanManager()
 const { jumpToAgentHub } = useAppContext()
@@ -197,6 +206,26 @@ const { jumpToAgentHub } = useAppContext()
     // on remount, the mount effect picks up the fresh cached index.
   }, [startScan])
 
+  /** Actually launch the terminal (after any approval gate has passed). */
+  const executeOpen = useCallback(async (
+    repo: RepoEntry,
+    command: string,
+    mode: 'new-tab' | 'new-window'
+  ): Promise<void> => {
+    try {
+      const result = await window.repoNav.openRepo(repo.path, command, mode)
+      if (result.success) {
+        const methodLabel = result.method === 'wt' ? 'Windows Terminal' : 'PowerShell'
+        showToast(`已通过 ${methodLabel} 打开 ${repo.name}`, 'success')
+        onRepoOpen?.(repo.path) // parent updates userData
+      } else {
+        showToast(`打开失败: ${result.error ?? '未知错误'}`, 'error')
+      }
+    } catch (e) {
+      showToast('打开失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
+    }
+  }, [onRepoOpen])
+
   const handleOpen = useCallback(async (repo: RepoEntry): Promise<void> => {
     if (!config) return
     const templates = config.commandTemplates ?? []
@@ -210,19 +239,21 @@ const { jumpToAgentHub } = useAppContext()
       ?? 'git pull; opencode'
     const mode = config.openIn
 
-    try {
-      const result = await window.repoNav.openRepo(repo.path, command, mode)
-      if (result.success) {
-        const methodLabel = result.method === 'wt' ? 'Windows Terminal' : 'PowerShell'
-        showToast(`已通过 ${methodLabel} 打开 ${repo.name}`, 'success')
-        onRepoOpen?.(repo.path) // parent updates userData
-      } else {
-        showToast(`打开失败: ${result.error ?? '未知错误'}`, 'error')
+    // ── Approval gate (v1.23, fail-closed before shell execution) ──
+    // 'dangerous' (default): confirm only pattern-matched commands.
+    // 'all': confirm everything. 'off': legacy behavior.
+    const approvalMode = config.approvalMode ?? 'dangerous'
+    if (approvalMode !== 'off') {
+      const needsConfirm =
+        approvalMode === 'all' || isDangerousCommand(command)
+      if (needsConfirm) {
+        setPendingApproval({ repo, command, mode })
+        return
       }
-    } catch (e) {
-      showToast('打开失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
     }
-  }, [config, selectedTemplate, onRepoOpen])
+
+    await executeOpen(repo, command, mode)
+  }, [config, selectedTemplate, onRepoOpen, executeOpen])
 
   const showToast = (message: string, type: 'success' | 'error'): void => {
     setToast({ message, type })
@@ -365,6 +396,23 @@ const { jumpToAgentHub } = useAppContext()
         <div className={`repo-nav-view__toast repo-nav-view__toast--${toast.type}`}>
           {toast.message}
         </div>
+      )}
+
+      {/* Approval gate dialog (v1.23) — shows the EXACT command to execute. */}
+      {pendingApproval && (
+        <ConfirmDialog
+          title="确认执行命令"
+          message={`即将在仓库「${pendingApproval.repo.name}」中执行以下命令：`}
+          detail={pendingApproval.command}
+          confirmText="执行"
+          danger={isDangerousCommand(pendingApproval.command)}
+          onConfirm={() => {
+            const req = pendingApproval
+            setPendingApproval(null)
+            void executeOpen(req.repo, req.command, req.mode)
+          }}
+          onCancel={() => setPendingApproval(null)}
+        />
       )}
     </div>
   )

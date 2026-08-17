@@ -10,9 +10,10 @@
 
 import { app } from 'electron'
 import { join } from 'path'
-import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync } from 'fs'
+import { readFileSync, existsSync, copyFileSync } from 'fs'
 import { createDefaultAgentHubConfig } from '../../shared/agentHub'
 import type { AgentHubConfig } from '../../shared/agentHub'
+import { writeJsonAtomic } from '../atomic'
 import { logger } from '../logger'
 
 const DATA_FILE = join(app.getPath('userData'), 'agentHub-config.json')
@@ -65,21 +66,17 @@ export function getAgentConfig(): AgentHubConfig {
 }
 
 /**
- * Persist the AgentHubConfig to disk atomically. Creates the userData
- * directory if needed, then updates the in-memory cache.
+ * Persist the AgentHubConfig to disk atomically (tmp + rename, shared
+ * helper), then updates the in-memory cache.
  */
 export function saveAgentConfig(cfg: AgentHubConfig): void {
   try {
-    const dir = app.getPath('userData')
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true })
-    }
     const payload: AgentHubConfig = {
       ...cfg,
       version: 1,
       updatedAt: new Date().toISOString()
     }
-    writeFileSync(DATA_FILE, JSON.stringify(payload, null, 2), 'utf-8')
+    writeJsonAtomic(DATA_FILE, payload)
 
     // Update cache so the next getAgentConfig() reflects the save
     cachedConfig = payload

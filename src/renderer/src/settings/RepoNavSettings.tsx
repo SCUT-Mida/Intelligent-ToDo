@@ -691,6 +691,51 @@ export default function RepoNavSettings(): JSX.Element {
             </span>
           </label>
         </div>
+
+        <div className="settings-divider" />
+
+        {/* 执行审批（v1.23） */}
+        <div className="field">
+          <label className="field__label">执行审批</label>
+          <div className="radio-group">
+            <label className="radio-group__item">
+              <input
+                type="radio"
+                name="approvalMode"
+                value="dangerous"
+                checked={(cfg.approvalMode ?? 'dangerous') === 'dangerous'}
+                onChange={() => setCfg((prev) => prev ? { ...prev, approvalMode: 'dangerous' } : prev)}
+                style={{ width: 16, height: 16, accentColor: 'var(--primary)' }}
+              />
+              <span className="field__row-text">仅危险命令需确认（推荐）</span>
+            </label>
+            <label className="radio-group__item">
+              <input
+                type="radio"
+                name="approvalMode"
+                value="all"
+                checked={cfg.approvalMode === 'all'}
+                onChange={() => setCfg((prev) => prev ? { ...prev, approvalMode: 'all' } : prev)}
+                style={{ width: 16, height: 16, accentColor: 'var(--primary)' }}
+              />
+              <span className="field__row-text">每次执行都确认</span>
+            </label>
+            <label className="radio-group__item">
+              <input
+                type="radio"
+                name="approvalMode"
+                value="off"
+                checked={cfg.approvalMode === 'off'}
+                onChange={() => setCfg((prev) => prev ? { ...prev, approvalMode: 'off' } : prev)}
+                style={{ width: 16, height: 16, accentColor: 'var(--primary)' }}
+              />
+              <span className="field__row-text">不确认（沿用旧行为）</span>
+            </label>
+          </div>
+          <div className="field__hint">
+            执行前弹窗展示将运行的完整命令串。危险命令包括删除（rm/del/Remove-Item）、强制推送（git push --force）、硬重置（git reset --hard）、输出重定向等；全部执行都会记录审计日志。
+          </div>
+        </div>
       </Section>
 
       {/* ─── 工具路径 ─── */}

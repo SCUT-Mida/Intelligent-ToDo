@@ -197,8 +197,9 @@ Intelligent-ToDo/
 
 ## 🗺️ Roadmap
 
-- [ ] Agent 任务模式：结构化一次性运行（stream-json → 事件日志 → 可检索）
-- [ ] 会话全文搜索
+- [x] ~~Agent 任务模式：结构化一次性运行（stream-json → 事件日志 → 可检索）~~（v1.23）
+- [x] ~~会话全文搜索~~（v1.23）
+- [x] ~~命令执行审批门~~（v1.23，dangerous/all/off 三档 + 审计日志）
 - [ ] 后台任务 + 托盘完成通知
 - [ ] Todo ↔ Agent 闭环（任务直接交给 agent 执行并回写摘要）
 - [ ] MCP 客户端支持（视自建 agent loop 进度）

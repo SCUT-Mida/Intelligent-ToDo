@@ -77,8 +77,11 @@ function safeSend(sender: WebContents, channel: string, ...args: unknown[]): voi
  *    files. Critical fallback when PATH is sanitized in packaged Electron.
  *
  * 3. **cmd.exe /c fallback**: last resort for unknown command types.
+ *
+ * Exported since v1.23 — the task runner (non-PTY, structured one-shot runs)
+ * reuses the exact same Windows command resolution.
  */
-function buildSpawnTarget(command: string): { file: string; args: string[] } {
+export function buildSpawnTarget(command: string): { file: string; args: string[] } {
   // If already an absolute path to an .exe, use directly.
   if (/\.(exe)$/i.test(command) && existsSync(command)) {
     return { file: command, args: [] }
@@ -171,8 +174,10 @@ function buildSpawnTarget(command: string): { file: string; args: string[] } {
  * 1. where.exe node — searches actual PATH (most reliable)
  * 2. Common Node.js install dirs (Program Files\nodejs, etc.)
  * 3. Last resort: bare 'node' (will likely fail but error is logged)
+ *
+ * Exported since v1.23 (see buildSpawnTarget).
  */
-function resolveNodeExe(): string {
+export function resolveNodeExe(): string {
   // Strategy 1: where.exe (searches PATH — works even in packaged Electron
   // because where.exe itself is in System32 which is always on PATH)
   if (process.platform === 'win32') {
@@ -298,8 +303,10 @@ function parseNpmCmdShim(cmdPath: string): { file: string; args: string[] } | nu
  *   - Any spawned process relying on PATH breaks
  *
  * Dirs already in PATH are not duplicated.
+ *
+ * Exported since v1.23 (see buildSpawnTarget).
  */
-function buildPtyEnv(): Record<string, string> {
+export function buildPtyEnv(): Record<string, string> {
   const env = { ...process.env } as Record<string, string>
 
   // Common Windows user-level bin directories — same set as buildSpawnTarget

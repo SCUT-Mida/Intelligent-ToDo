@@ -8,11 +8,12 @@
 
 import { app } from 'electron'
 import { join } from 'path'
-import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync } from 'fs'
+import { readFileSync, existsSync, copyFileSync } from 'fs'
 import {
   createDefaultAgentHubData
 } from '../../shared/agentHub'
 import type { AgentHubData } from '../../shared/agentHub'
+import { writeJsonAtomic } from '../atomic'
 import { logger } from '../logger'
 
 const DATA_FILE = join(app.getPath('userData'), 'agentHub-sessions.json')
@@ -53,20 +54,16 @@ export function loadSessions(): AgentHubData {
 }
 
 /**
- * Persist sessions to disk atomically. Creates the directory if needed.
+ * Persist sessions to disk atomically (tmp + rename, via shared helper).
  */
 export function saveSessions(data: AgentHubData): void {
   try {
-    const dir = app.getPath('userData')
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true })
-    }
     const payload: AgentHubData = {
       ...data,
       version: 1,
       updatedAt: new Date().toISOString()
     }
-    writeFileSync(DATA_FILE, JSON.stringify(payload, null, 2), 'utf-8')
+    writeJsonAtomic(DATA_FILE, payload)
   } catch (err) {
     logger.error('agentHub:persist', 'failed to save sessions', {
       error: err instanceof Error ? err.message : String(err)

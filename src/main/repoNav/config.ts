@@ -16,12 +16,14 @@
  * to the new CommandTemplate[] format.
  */
 
-import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'fs'
+import { existsSync, readFileSync, copyFileSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
 import type { RepoNavConfig } from '../../shared/repoNav'
 import { DEFAULT_TEMPLATES, DEFAULT_COMMANDS, migrateLegacyConfig } from '../../shared/repoNav'
 import { dataFilePath, legacyFilePath, migrateFromLegacy } from './paths'
+import { writeJsonAtomic } from '../atomic'
+import { logger } from '../logger'
 
 // ── Default values used when no config file exists ─────────────────────────
 
@@ -122,8 +124,20 @@ export function getConfig(): RepoNavConfig {
       // Merge with defaults so missing fields don't crash the app
       cachedConfig = { ...DEFAULT_CONFIG, ...migrated }
       return cachedConfig
-    } catch {
-      // Fall through to defaults on parse error
+    } catch (err) {
+      // Corrupted config — back it up before falling back to defaults
+      // (v1.23 hardening: previously this fell through SILENTLY, losing the
+      // original file when the next save overwrote it).
+      try {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-')
+        copyFileSync(cfgPath, `${cfgPath}.corrupt-${ts}`)
+        logger.warn('repoNav:config', 'config corrupted, backed up and using defaults', {
+          path: cfgPath,
+          error: err instanceof Error ? err.message : String(err)
+        })
+      } catch {
+        logger.warn('repoNav:config', 'config corrupted and backup failed', { path: cfgPath })
+      }
     }
   }
 
@@ -135,6 +149,7 @@ export function getConfig(): RepoNavConfig {
  * Write a new config to the resolved config path and update the in-memory cache.
  * Always writes to the primary location (<userData>/repo-nav/config.json),
  * even if the config was originally loaded from the env var or legacy path.
+ * Atomic (tmp + rename) since v1.23.
  */
 export function saveConfig(cfg: RepoNavConfig): void {
   const primaryPath = dataFilePath('config.json')
@@ -144,7 +159,7 @@ export function saveConfig(cfg: RepoNavConfig): void {
   const envPath = process.env['REPO_NAVIGATOR_CONFIG']
   const targetPath = envPath && existsSync(envPath) ? envPath : primaryPath
 
-  writeFileSync(targetPath, JSON.stringify(cfg, null, 2), 'utf-8')
+  writeJsonAtomic(targetPath, cfg)
 
   // Update both cache entries
   cachedConfig = cfg

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import type { AgentSession, AgentDescriptor } from '@shared/agentHub'
+import type { AgentSession, AgentDescriptor, SessionSearchHit } from '@shared/agentHub'
 import AgentIcon from './AgentIcon'
 
 // Group key for sessions without a workDir (shouldn't normally happen).
@@ -21,6 +21,14 @@ interface SessionSidebarProps {
   onToggleCollapse: () => void
   /** Called while the user drags the sidebar's right-edge resizer. */
   onResize: (w: number) => void
+  /** Cross-session search (v1.23): called (debounced by the parent) on input. */
+  onSearch: (query: string) => void
+  /** Current search hits (null = not searching). */
+  searchResults: SessionSearchHit[] | null
+  /** Whether a search is in flight. */
+  searching: boolean
+  /** Called when a search hit is clicked. */
+  onSelectResult: (hit: SessionSearchHit) => void
 }
 
 /**
@@ -72,11 +80,31 @@ export default function SessionSidebar({
   collapsed,
   width,
   onToggleCollapse,
-  onResize
+  onResize,
+  onSearch,
+  searchResults,
+  searching,
+  onSelectResult
 }: SessionSidebarProps): JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const [searchText, setSearchText] = useState('')
+
+  // Local search input state → debounced parent query. ≥2 chars searches;
+  // clearing the box exits search mode (back to the grouped session list).
+  useEffect(() => {
+    const q = searchText.trim()
+    if (q.length < 2) {
+      onSearch('')
+      return
+    }
+    const t = window.setTimeout(() => onSearch(q), 250)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchText])
+
+  const isSearching = searchText.trim().length >= 2
 
   // WorkDir groups collapsed by the user (keyed by the group key).
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
@@ -209,8 +237,48 @@ export default function SessionSidebar({
           ＋ 新建会话
         </button>
       </div>
+      <div className="agent-hub__sidebar-search">
+        <input
+          className="input agent-hub__sidebar-search-input"
+          placeholder="🔍 搜索提问与任务记录…"
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+        {searchText && (
+          <button
+            className="agent-hub__sidebar-search-clear"
+            onClick={() => setSearchText('')}
+            title="清除搜索"
+          >
+            ×
+          </button>
+        )}
+      </div>
       <div className="agent-hub__sidebar-list">
-        {sorted.length === 0 ? (
+        {isSearching ? (
+          <div className="agent-hub__search-results">
+            {searching && <div className="agent-hub__search-status">搜索中…</div>}
+            {!searching && (searchResults?.length ?? 0) === 0 && (
+              <div className="agent-hub__search-status">没有匹配的记录</div>
+            )}
+            {searchResults?.map((hit, i) => (
+              <button
+                key={i}
+                className="agent-hub__search-hit"
+                onClick={() => onSelectResult(hit)}
+                title={hit.workDir || undefined}
+              >
+                <span className={`agent-hub__search-hit-source agent-hub__search-hit-source--${hit.source}`}>
+                  {hit.source === 'prompt' ? '提问' : hit.source === 'assistant' ? '回答' : '工具'}
+                </span>
+                <span className="agent-hub__search-hit-snippet">{hit.snippet}</span>
+                <span className="agent-hub__search-hit-meta">
+                  {hit.workDir ? hit.workDir.replace(/\\/g, '/').split('/').pop() : ''}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : sorted.length === 0 ? (
           <div style={{ padding: '20px 14px', textAlign: 'center', fontSize: 13, color: 'var(--text-faint)' }}>
             暂无会话，点击「＋ 新建」开始
           </div>

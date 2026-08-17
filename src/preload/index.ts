@@ -4,14 +4,19 @@ import { IPC } from '../shared/repoNav'
 import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry, RepoIndex, RepoUserData, ToolProbeResult } from '../shared/repoNav'
 import { AI_IPC } from '../shared/aiConfig'
 import type { AiConfigScanResult } from '../shared/aiConfig'
-import { AGENT_IPC, PTY_STREAM } from '../shared/agentHub'
+import { AGENT_IPC, PTY_STREAM, TASK_IPC, TASK_STREAM } from '../shared/agentHub'
 import type {
   AgentDescriptor,
   AgentHubData,
   AgentHubConfig,
   LaunchPayload,
   LaunchResult,
-  AgentProbeResult
+  AgentProbeResult,
+  TaskRunRequest,
+  TaskRunStartResult,
+  TaskRunInfo,
+  TaskEvent,
+  SessionSearchHit
 } from '../shared/agentHub'
 
 // V2 IPC channels for AI memory features (will be moved to shared IPC_V2 when backend lands)
@@ -196,6 +201,34 @@ const agentHub = {
     const handler = (_e: unknown, sessionId: string, exitCode: number): void => cb(sessionId, exitCode)
     ipcRenderer.on(PTY_STREAM.EXIT, handler)
     return () => ipcRenderer.removeListener(PTY_STREAM.EXIT, handler as never)
+  },
+
+  // ── Structured task runs (v1.23) ──
+  /** Start a one-shot structured agent run; progress arrives via onTaskEvent. */
+  runTask: (req: TaskRunRequest): Promise<TaskRunStartResult> =>
+    ipcRenderer.invoke(TASK_IPC.RUN, req),
+  /** Cancel a running task run. */
+  cancelTask: (runId: string): Promise<boolean> =>
+    ipcRenderer.invoke(TASK_IPC.CANCEL, runId),
+  /** List tracked runs (running first). */
+  listTasks: (): Promise<TaskRunInfo[]> => ipcRenderer.invoke(TASK_IPC.LIST),
+  /** Load a session's persisted structured event log. */
+  getSessionEvents: (sessionId: string): Promise<TaskEvent[]> =>
+    ipcRenderer.invoke(TASK_IPC.GET_EVENTS, sessionId),
+  /** Local search across question histories + event logs. */
+  searchSessions: (query: string): Promise<SessionSearchHit[]> =>
+    ipcRenderer.invoke(TASK_IPC.SEARCH, query),
+  /** Subscribe to live TaskEvents of running tasks (all sessions). */
+  onTaskEvent: (cb: (sessionId: string, event: TaskEvent) => void): (() => void) => {
+    const handler = (_e: unknown, sessionId: string, event: TaskEvent): void => cb(sessionId, event)
+    ipcRenderer.on(TASK_STREAM.EVENT, handler)
+    return () => ipcRenderer.removeListener(TASK_STREAM.EVENT, handler as never)
+  },
+  /** Subscribe to task runs reaching a terminal state. */
+  onTaskDone: (cb: (sessionId: string, info: TaskRunInfo) => void): (() => void) => {
+    const handler = (_e: unknown, sessionId: string, info: TaskRunInfo): void => cb(sessionId, info)
+    ipcRenderer.on(TASK_STREAM.DONE, handler)
+    return () => ipcRenderer.removeListener(TASK_STREAM.DONE, handler as never)
   }
 }
 

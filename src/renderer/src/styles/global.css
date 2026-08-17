@@ -4307,3 +4307,32 @@ select {
   border-radius: 999px;
   font-size: 11px;
 }
+
+/* ── Shared confirm dialog (v1.23) ─────────────────────────────────────── */
+
+.confirm-dialog {
+  width: 480px;
+  max-width: 92vw;
+}
+
+.confirm-dialog__message {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.confirm-dialog__detail {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: #1e1e2e;
+  color: #f38ba8;
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 220px;
+  overflow: auto;
+}

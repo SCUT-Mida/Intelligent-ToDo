@@ -65,6 +65,123 @@ export const AGENT_IPC = {
    EXIT: 'agentHub:pty:exit'
  } as const
 
+// ── Structured task runs (v1.23) ─────────────────────────────────────────────
+
+/** IPC channels for the task runner (renderer → main). */
+export const TASK_IPC = {
+  /** Start a structured one-shot task run. Returns the run id (or null). */
+  RUN: 'agentHub:task:run',
+  /** Cancel a running task. */
+  CANCEL: 'agentHub:task:cancel',
+  /** List known runs (running + recent finished). */
+  LIST: 'agentHub:task:list',
+  /** Load a session's persisted event log. */
+  GET_EVENTS: 'agentHub:task:getEvents',
+  /** Search across session histories + event logs. */
+  SEARCH: 'agentHub:search'
+} as const
+
+/** Push events for task runs (main → renderer). */
+export const TASK_STREAM = {
+  /** One structured TaskEvent was produced (persisted + pushed live). */
+  EVENT: 'agentHub:task:event',
+  /** A run reached a terminal state (finished/error/cancelled). */
+  DONE: 'agentHub:task:done'
+} as const
+
+/** Structured event types for a session's append-only JSONL log. */
+export type TaskEventType =
+  | 'run_started'
+  | 'user_message'
+  | 'assistant_message'
+  | 'tool_call'
+  | 'tool_result'
+  | 'run_finished'
+  | 'run_error'
+  | 'run_cancelled'
+
+/**
+ * One append-only event in a session's structured log
+ * (<userData>/agentHub/events/<sessionId>.jsonl). Event-sourced design
+ * borrowed from dsh's session log: everything the agent did is replayable.
+ */
+export interface TaskEvent {
+  /** Monotonic per-file sequence number (0-based). */
+  seq: number
+  /** ISO timestamp. */
+  at: string
+  type: TaskEventType
+  /** Which run produced this event (runs are keyed `run-<base36>`). */
+  runId: string
+  /** For run_started / run_finished / run_error / run_cancelled. */
+  command?: string
+  /** assistant_message text. */
+  text?: string
+  /** user_message prompt. */
+  prompt?: string
+  /** tool_call name + JSON-stringified input. */
+  toolName?: string
+  toolInput?: string
+  /** tool_result content (may be truncated). */
+  toolResult?: string
+  /** run_finished: process exit code. */
+  exitCode?: number
+  /** run_finished: final result text (claude 'result' event). */
+  result?: string
+  /** run_error message. */
+  error?: string
+  /** Token usage when the agent reports it (claude result event). */
+  usage?: { inputTokens?: number; outputTokens?: number }
+}
+
+/** Request payload for starting a structured task run. */
+export interface TaskRunRequest {
+  sessionId: string
+  /** AgentDefinition.command — resolved on the main side. */
+  command: string
+  /** AgentDefinition.outputMode decides the parsing strategy. */
+  outputMode: AgentOutputMode
+  /** Optional per-agent args string (same format as PTY launches). */
+  args?: string
+  workDir: string
+  /** The task prompt. */
+  prompt: string
+}
+
+/** Live/persisted run descriptor (TASK_IPC.LIST + TaskRunDialog state). */
+export interface TaskRunInfo {
+  runId: string
+  sessionId: string
+  command: string
+  workDir: string
+  startedAt: string
+  status: 'running' | 'finished' | 'error' | 'cancelled'
+  /** exit code when finished. */
+  exitCode?: number
+  endedAt?: string
+}
+
+/** Result of TASK_IPC.RUN. */
+export interface TaskRunStartResult {
+  ok: boolean
+  runId?: string
+  error?: string
+}
+
+/** Search hit for TASK_IPC.SEARCH. */
+export interface SessionSearchHit {
+  /** Session id when the hit maps to a saved session, else null. */
+  sessionId: string | null
+  /** Repo/workDir context for display. */
+  workDir: string
+  /** ISO timestamp of the matched entry. */
+  at: string
+  /** Where the hit came from. */
+  source: 'prompt' | 'assistant' | 'tool'
+  /** Snippet with the match roughly centered (already truncated). */
+  snippet: string
+}
+
 // ── Agent descriptors ───────────────────────────────────────────────────────
 
 export type AgentOutputMode = 'stream-json' | 'print' | 'generic'

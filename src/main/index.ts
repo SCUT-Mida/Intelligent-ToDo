@@ -7,7 +7,7 @@ import { getDayInfo, describeDay, WEEKDAYS_ZH, remainingWorkdays } from '../shar
 import { createDefaultData } from '../shared/types'
 import { registerRepoNavIpc } from './repoNav'
 import { registerAgentHubIpc } from './agentHub'
-import { killAllPtys } from './agentHub/pty'
+import { killAllPtys, cancelAllTasks } from './agentHub'
 import { scanAiConfigs } from './aiConfigScanner'
 import { AI_IPC } from '../shared/aiConfig'
 import { extractJson } from '../shared/jsonUtils'
@@ -988,6 +988,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   try { killAllPtys() } catch { /* non-fatal */ }
+  try { cancelAllTasks() } catch { /* non-fatal */ }
   try { flushTokenUsage() } catch { /* non-fatal */ }
 })
 
