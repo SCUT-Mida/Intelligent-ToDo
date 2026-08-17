@@ -15,6 +15,12 @@ export interface AppState {
   /** Cross-app navigation: when set, AgentHub reads this on mount to pre-fill
    *  a new session's workDir. Cleared after consumption. */
   pendingAgentHubWorkDir: string | null
+  /**
+   * Todo → Agent hand-off (v1.24): when set, AgentHub opens its task dialog
+   * pre-filled with this task; on successful completion the result summary
+   * is written back to the task's notes. Cleared after consumption.
+   */
+  pendingAgentHubTask: { taskId: string; title: string; notes?: string } | null
 }
 
 type Action =
@@ -25,6 +31,7 @@ type Action =
   | { type: 'CLOSE_SETTINGS' }
   | { type: 'SET_LOADED'; payload: { loaded: boolean; error?: string | null } }
   | { type: 'SET_PENDING_AGENT_HUB_WORKDIR'; payload: string | null }
+  | { type: 'SET_PENDING_AGENT_HUB_TASK'; payload: AppState['pendingAgentHubTask'] }
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -42,6 +49,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, loaded: action.payload.loaded, loadError: action.payload.error ?? null }
     case 'SET_PENDING_AGENT_HUB_WORKDIR':
       return { ...state, pendingAgentHubWorkDir: action.payload }
+    case 'SET_PENDING_AGENT_HUB_TASK':
+      return { ...state, pendingAgentHubTask: action.payload }
     default:
       return state
   }
@@ -54,7 +63,8 @@ const initialState: AppState = {
   aiConfigured: false,
   loaded: false,
   loadError: null,
-  pendingAgentHubWorkDir: null
+  pendingAgentHubWorkDir: null,
+  pendingAgentHubTask: null
 }
 
 interface AppContextValue {
@@ -68,6 +78,10 @@ interface AppContextValue {
   jumpToAgentHub: (workDir: string) => void
   /** Clear the pending workDir after AgentHub consumed it. */
   clearPendingWorkDir: () => void
+  /** Hand a Todo task to AgentHub (opens a pre-filled task run, v1.24). */
+  handTaskToAgent: (task: { taskId: string; title: string; notes?: string }) => void
+  /** Clear the pending task hand-off after AgentHub consumed it. */
+  clearPendingAgentTask: () => void
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -131,8 +145,30 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     dispatch({ type: 'SET_PENDING_AGENT_HUB_WORKDIR', payload: null })
   }, [])
 
+  const handTaskToAgent = useCallback((task: { taskId: string; title: string; notes?: string }): void => {
+    dispatch({ type: 'SET_PENDING_AGENT_HUB_TASK', payload: task })
+    dispatch({ type: 'SET_ACTIVE_APP', payload: 'agentHub' })
+  }, [])
+
+  const clearPendingAgentTask = useCallback((): void => {
+    dispatch({ type: 'SET_PENDING_AGENT_HUB_TASK', payload: null })
+  }, [])
+
   return (
-    <AppContext.Provider value={{ state, dispatch, updateConfig, setActiveApp, openSettings, closeSettings, jumpToAgentHub, clearPendingWorkDir }}>
+    <AppContext.Provider
+      value={{
+        state,
+        dispatch,
+        updateConfig,
+        setActiveApp,
+        openSettings,
+        closeSettings,
+        jumpToAgentHub,
+        clearPendingWorkDir,
+        handTaskToAgent,
+        clearPendingAgentTask
+      }}
+    >
       {children}
     </AppContext.Provider>
   )

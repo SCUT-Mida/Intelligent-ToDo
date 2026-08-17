@@ -3,6 +3,7 @@ import type { Task, Quadrant, TaskRecurrence } from '@shared/types'
 import { QUADRANTS } from '@shared/types'
 import { formatRecurrence } from '@shared/recurrence'
 import ProgressSteps from './ProgressSteps'
+import { useAppContext } from '../store/AppContext'
 
 type FreqType = 'once' | 'weekly' | 'monthly' | 'yearly'
 
@@ -26,6 +27,7 @@ export default function TaskModal({
   onSave,
   onClose
 }: TaskModalProps): JSX.Element {
+  const { handTaskToAgent } = useAppContext()
   const [content, setContent] = useState(task?.content ?? '')
   const [notes, setNotes] = useState(task?.notes ?? '')
   const [quadrant, setQuadrant] = useState<Quadrant>(task?.quadrant ?? defaultQuadrant)
@@ -197,6 +199,26 @@ export default function TaskModal({
           </div>
         </div>
         <div className="modal__footer">
+          {/* v1.24 Todo ↔ Agent hand-off: only for EXISTING tasks (a task id
+              is needed for the result write-back). */}
+          {task && (
+            <button
+              className="btn btn--ghost task-modal__handoff"
+              onClick={() => {
+                if (!task) return
+                handTaskToAgent({
+                  taskId: task.id,
+                  title: content.trim() || task.content,
+                  notes: notes.trim() || task.notes
+                })
+                onClose()
+              }}
+              disabled={!content.trim()}
+              title="切换到 Agent 对话，预填该任务运行一次性 agent 任务；完成后摘要自动回写到任务备注"
+            >
+              🤖 交给 Agent
+            </button>
+          )}
           <button className="btn btn--ghost" onClick={onClose}>取消</button>
           <button className="btn btn--primary" onClick={handleSave} disabled={!content.trim() || (freqType === 'weekly' && weekdays.length === 0)}>
             保存

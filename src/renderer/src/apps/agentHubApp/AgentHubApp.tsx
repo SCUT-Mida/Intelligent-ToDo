@@ -10,7 +10,7 @@ import type { MarkdownHandle } from '../../components/AgentHub/MarkdownEditor'
 import TerminalView from '../../components/AgentHub/TerminalView'
 import type { TerminalHandle } from '../../components/AgentHub/TerminalView'
 import type { AgentSession, AgentDescriptor, AgentDefinition, AgentHubData, AgentHubConfig, SessionHistoryEntry, TaskEvent, TaskRunInfo, SessionSearchHit } from '@shared/agentHub'
-import { createDefaultAgentHubData } from '@shared/agentHub'
+import { createDefaultAgentHubData, buildHandoffPrompt } from '@shared/agentHub'
 import '../../styles/agentHub.css'
 
 interface RepoEntry {
@@ -58,7 +58,7 @@ function startResizeDrag(
  * Supports cross-app jump from RepoNav via pendingAgentHubWorkDir.
  */
 export default function AgentHubApp(): JSX.Element {
-  const { state, clearPendingWorkDir } = useAppContext()
+  const { state, dispatch, clearPendingWorkDir, clearPendingAgentTask } = useAppContext()
 
   // ── State ──────────────────────────────────────────────────────────────
 
@@ -93,10 +93,18 @@ export default function AgentHubApp(): JSX.Element {
   // Cross-session search.
   const [searchResults, setSearchResults] = useState<SessionSearchHit[] | null>(null)
   const [searching, setSearching] = useState(false)
+  // Ephemeral flash banner (task write-back confirmations etc.).
+  const [flash, setFlash] = useState<string | null>(null)
 
   // Dialog state
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false)
   const [pendingWorkDir, setPendingWorkDir] = useState<string | null>(null)
+
+  // ── Todo → Agent hand-off bookkeeping (v1.24) ──────────────────────────
+  // TaskId currently awaiting a task-dialog run (set when consuming
+  // pendingAgentHubTask), and runId → taskId links for write-back.
+  const pendingHandoffRef = useRef<string | null>(null)
+  const taskLinksRef = useRef(new Map<string, string>())
 
   // Refs to always have access to latest values in callbacks
   const selectedAgentIdRef = useRef(selectedAgentId)
@@ -113,6 +121,12 @@ export default function AgentHubApp(): JSX.Element {
 
   const agentsRef = useRef(agents)
   agentsRef.current = agents
+
+  const sessionEventsRef = useRef(sessionEvents)
+  sessionEventsRef.current = sessionEvents
+
+  const appStateRef = useRef(state.data)
+  appStateRef.current = state.data
 
   // Embedded terminal handles, keyed by session id (for send-to-terminal).
   // The terminal stays mounted per session (v1.14.x PTY-persistence pattern).
@@ -232,16 +246,43 @@ export default function AgentHubApp(): JSX.Element {
         return { ...prev, [sessionId]: [...prev[sessionId], event] }
       })
     })
-    const unsubDone = window.agentHub.onTaskDone(() => {
+    const unsubDone = window.agentHub.onTaskDone((_sessionId, info) => {
       // Refresh the runs registry (running counts drive tab badges etc.).
       window.agentHub.listTasks().then(setTaskRuns).catch(() => { /* non-fatal */ })
+
+      // Todo write-back (v1.24): runs launched via 「交给 Agent」 append
+      // their result summary back to the task's notes.
+      const linkedTaskId = taskLinksRef.current.get(info.runId)
+      if (linkedTaskId && info.status === 'finished') {
+        taskLinksRef.current.delete(info.runId)
+        const events = sessionEventsRef.current[info.sessionId] ?? []
+        const lastFinish = [...events].reverse().find((e) => e.type === 'run_finished')
+        const summary = (lastFinish?.result || lastFinish?.text || '').trim()
+        if (summary) {
+          const now = new Date()
+          const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+          const data = appStateRef.current
+          const tasks = data.tasks.map((t) =>
+            t.id === linkedTaskId
+              ? {
+                  ...t,
+                  notes: `${t.notes ? t.notes + '\n\n' : ''}[Agent 完成 @ ${stamp}]\n${summary.slice(0, 500)}`,
+                  updatedAt: now.toISOString()
+                }
+              : t
+          )
+          dispatch({ type: 'SET_DATA', payload: { ...data, tasks } })
+          setFlash(`Agent 任务完成，摘要已回写到任务「${data.tasks.find((t) => t.id === linkedTaskId)?.content ?? linkedTaskId}」的备注`)
+          window.setTimeout(() => setFlash(null), 6000)
+        }
+      }
     })
     window.agentHub.listTasks().then(setTaskRuns).catch(() => { /* non-fatal */ })
     return () => {
       unsubEvents()
       unsubDone()
     }
-  }, [])
+  }, [dispatch])
 
   // Check for pendingAgentHubWorkDir (cross-app jump from RepoNav).
   // The jump ALWAYS opens the interactive dialog — the last-used agent is
@@ -255,6 +296,27 @@ export default function AgentHubApp(): JSX.Element {
     setPendingWorkDir(pending)
     setShowNewSessionDialog(true)
   }, [loading, state.pendingAgentHubWorkDir, clearPendingWorkDir])
+
+  // Consume a Todo → Agent task hand-off (v1.24): pre-fill the task dialog
+  // on the active session (or the first one) and remember the task link so
+  // the finished result writes back to the task's notes.
+  useEffect(() => {
+    if (loading) return
+    const pending = state.pendingAgentHubTask
+    if (!pending) return
+    clearPendingAgentTask()
+    if (sessions.length === 0) {
+      setFlash('还没有 Agent 会话——请先「＋ 新建会话」（选好 agent 与工作目录），再从任务里使用「交给 Agent」')
+      window.setTimeout(() => setFlash(null), 8000)
+      return
+    }
+    const target = activeSessionIdRef.current ?? sessions[0].id
+    setActiveSessionId(target)
+    pendingHandoffRef.current = pending.taskId
+    setTaskDialogPrefill(buildHandoffPrompt({ title: pending.title, notes: pending.notes }))
+    setTaskDialogSessionId(target)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, state.pendingAgentHubTask])
 
   // ── Derived values ────────────────────────────────────────────────────
 
@@ -459,14 +521,22 @@ export default function AgentHubApp(): JSX.Element {
           outputMode: agent.outputMode,
           args: agent.args,
           workDir: session.workDir,
-          prompt
+          prompt,
+          background
         })
         if (!result.ok) {
           console.error('Task run failed to start', result.error)
+          pendingHandoffRef.current = null
           return
+        }
+        // Link this run to the handed-off Todo task (if any) for write-back.
+        if (pendingHandoffRef.current && result.runId) {
+          taskLinksRef.current.set(result.runId, pendingHandoffRef.current)
+          pendingHandoffRef.current = null
         }
         // Ensure the timeline tracks this session even if it was never loaded.
         setSessionEvents((prev) => (prev[sessionId] ? prev : { ...prev, [sessionId]: [] }))
+        window.agentHub.listTasks().then(setTaskRuns).catch(() => { /* non-fatal */ })
         handleCloseTaskDialog()
         if (!background) {
           setSessionTabs((prev) => ({ ...prev, [sessionId]: 'tasks' }))
@@ -594,6 +664,39 @@ export default function AgentHubApp(): JSX.Element {
       />
 
       <div className="agent-hub__main">
+        {/* Flash banner (write-back confirmations, hand-off hints). */}
+        {flash && (
+          <div className="agent-hub__flash">
+            {flash}
+            <button className="agent-hub__flash-close" onClick={() => setFlash(null)} aria-label="关闭">×</button>
+          </div>
+        )}
+        {/* Background task indicator (v1.24): running tasks across sessions.
+            Clicking jumps to that session's 任务记录 tab. */}
+        {taskRuns.filter((r) => r.status === 'running').length > 0 && (
+          <div className="agent-hub__tasks-bar">
+            <span className="spinner spinner--sm" />
+            <span className="agent-hub__tasks-bar-label">
+              {taskRuns.filter((r) => r.status === 'running').length} 个任务后台运行中
+            </span>
+            {taskRuns
+              .filter((r) => r.status === 'running')
+              .slice(0, 4)
+              .map((r) => (
+                <button
+                  key={r.runId}
+                  className="agent-hub__tasks-bar-chip"
+                  title={`${r.command}\n${r.workDir}`}
+                  onClick={() => {
+                    setActiveSessionId(r.sessionId)
+                    setSessionTabs((prev) => ({ ...prev, [r.sessionId]: 'tasks' }))
+                  }}
+                >
+                  {r.command} · {r.workDir.split(/[\\/]/).pop()}
+                </button>
+              ))}
+          </div>
+        )}
         <div className="agent-hub__content">
           {sessions.length === 0 ? (
             <div className="agent-hub__empty">

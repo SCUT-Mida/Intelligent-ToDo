@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, Notification } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, rmSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
@@ -17,6 +17,8 @@ import type { NetResponse } from './netFetch'
 import { callLLM } from './aiClient'
 import { getRecentTokenUsage, flushTokenUsage } from './tokenMeter'
 import type { TokenUsageDay } from './tokenMeter'
+import { notifyBus } from './notify'
+import type { AppNotification } from './notify'
 import { encryptApiKey, decryptApiKey } from './crypto'
 
 // ── Single-instance lock + GPU cache cleanup ───────────────────────────────
@@ -889,6 +891,36 @@ app.whenReady().then(() => {
   )
 
   createWindow()
+
+  // ── OS notifications (v1.24) ───────────────────────────────────────────
+  // Feature modules (taskRunner…) fire through notifyBus; this is the single
+  // owner of the OS surfaces. Notification click focuses the main window;
+  // when the OS/notification API is unavailable we fall back to the tray
+  // balloon (Windows). The close-to-tray one-shot balloon guard does NOT
+  // apply here — these are per-event completion notices.
+  notifyBus.on('notify', (n: AppNotification) => {
+    try {
+      if (Notification.isSupported()) {
+        const note = new Notification({ title: n.title, body: n.body })
+        note.on('click', () => {
+          const win = BrowserWindow.getAllWindows()[0]
+          if (win) {
+            if (!win.isVisible()) win.show()
+            win.focus()
+          }
+        })
+        note.show()
+        return
+      }
+    } catch {
+      // fall through to balloon
+    }
+    try {
+      tray?.displayBalloon({ title: n.title, content: n.body })
+    } catch {
+      // no tray either — nothing more we can do
+    }
+  })
 
   // Create the system tray (must be after the window is created).
   const mainWindow = BrowserWindow.getAllWindows()[0]

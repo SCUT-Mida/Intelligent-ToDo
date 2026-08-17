@@ -29,6 +29,7 @@ import { buildSpawnTarget, buildPtyEnv } from './pty'
 import { parseStreamJsonLine, buildTaskArgv } from './streamJson'
 import { appendSessionEvent, loadSessionEvents, nextSeqFor } from './eventLog'
 import { recordTokenUsage } from '../tokenMeter'
+import { notifyBus } from '../notify'
 
 interface ActiveRun {
   runId: string
@@ -40,6 +41,10 @@ interface ActiveRun {
   status: TaskRunInfo['status']
   exitCode?: number
   endedAt?: string
+  /** Background runs fire an OS notification on completion (v1.24). */
+  background: boolean
+  /** Final result text (for the notification body / Todo write-back). */
+  resultText?: string
 }
 
 /** Active + recently finished runs, keyed by runId. */
@@ -105,7 +110,8 @@ export function runTask(sender: WebContents | null, req: TaskRunRequest): TaskRu
       workDir: req.workDir,
       startedAt: new Date().toISOString(),
       child,
-      status: 'running'
+      status: 'running',
+      background: req.background === true
     }
     runs.set(runId, run)
     pruneFinishedRuns()
@@ -185,6 +191,7 @@ export function runTask(sender: WebContents | null, req: TaskRunRequest): TaskRu
                 (pendingResult.usage.inputTokens ?? 0) + (pendingResult.usage.outputTokens ?? 0)
             })
           }
+          run.resultText = pendingResult.result ?? pendingResult.text
           emitParsed(sender, run, pendingResult)
         }
         if (run.status === 'error') {
@@ -196,16 +203,24 @@ export function runTask(sender: WebContents | null, req: TaskRunRequest): TaskRu
         if (text) {
           emit(sender, run, 'assistant_message', { text: text.slice(0, 50000) })
         }
+        run.resultText = text
         if (run.status === 'error') {
           emit(sender, run, 'run_error', { exitCode, error: `agent 进程退出码 ${exitCode}` })
-        } else if (!text) {
-          emit(sender, run, 'run_finished', { exitCode, result: '' })
         } else {
           emit(sender, run, 'run_finished', { exitCode, result: text.slice(0, 20000) })
         }
       }
 
       safeSend(sender, TASK_STREAM.DONE, run.sessionId, taskRunInfo(run))
+      // Background runs notify via the OS (v1.24) — foreground runs are
+      // watched live in the timeline, no notification needed.
+      if (run.background) {
+        notifyBus.fire({
+          kind: run.status === 'finished' ? 'task-done' : run.status === 'cancelled' ? 'info' : 'task-error',
+          title: run.status === 'finished' ? 'Agent 任务完成' : run.status === 'cancelled' ? 'Agent 任务已取消' : 'Agent 任务失败',
+          body: `${req.command} · ${(run.resultText ?? '').slice(0, 120).replace(/\s+/g, ' ') || `退出码 ${exitCode}`}`
+        })
+      }
       logger.info('agentHub:task', 'run ended', { runId, status: run.status, exitCode })
     }
 

@@ -146,6 +146,8 @@ export interface TaskRunRequest {
   workDir: string
   /** The task prompt. */
   prompt: string
+  /** Background runs fire an OS notification on completion (v1.24). */
+  background?: boolean
 }
 
 /** Live/persisted run descriptor (TASK_IPC.LIST + TaskRunDialog state). */
@@ -180,6 +182,18 @@ export interface SessionSearchHit {
   source: 'prompt' | 'assistant' | 'tool'
   /** Snippet with the match roughly centered (already truncated). */
   snippet: string
+}
+
+/**
+ * Build the pre-filled task prompt for a Todo → Agent hand-off (v1.24).
+ * Pure function — unit tested in tests/shared/agentHub.test.ts.
+ */
+export function buildHandoffPrompt(task: { title: string; notes?: string }): string {
+  return (
+    `请完成以下任务：\n\n${task.title}` +
+    (task.notes ? `\n\n任务备注：\n${task.notes}` : '') +
+    `\n\n完成后请给出简明总结（做了什么、关键结论与后续建议）。`
+  )
 }
 
 // ── Agent descriptors ───────────────────────────────────────────────────────
@@ -234,6 +248,16 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
     id: 'nga', name: 'NGA', icon: '🧰', command: 'nga',
     description: 'NGA（内部 opencode 封装）',
     outputMode: 'print'
+  },
+  {
+    // v1.24: DeepSeek's open-source agent harness ("Everything is a Plugin").
+    // TUI works in the embedded terminal; task runs use the headless
+    // `dsh --profile headless "<task>"` form — users can tailor the profile
+    // via per-agent args (e.g. --profile headless).
+    id: 'dsh', name: 'DeepSeek Harness', icon: '🐋', command: 'dsh',
+    description: 'DeepSeek 官方插件化 agent harness（dsh）',
+    outputMode: 'print',
+    homepage: 'https://github.com/deepseek-ai/deepseek-harness'
   }
 ]
 

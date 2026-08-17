@@ -26,19 +26,24 @@
 - **历史回顾**：每日 AI 分析快照自动存档，按日期复盘
 - **番茄钟 / 日历视图 / Markdown 导出**
 
+### 💬 Agent 对话（AgentHub）
+
+- **会话管理**：保存（agent + 工作目录）会话，按仓库分组；**v1.22 起首个提问后由 LLM 自动生成会话标题**（手动改过的标题永不覆盖）
+- **嵌入式终端**：ConPTY（`@lydell/node-pty`）+ xterm.js 6，100% 原生 CLI 交互（斜杠命令、TUI、流式输出）
+- **CLI 助手支持**：Claude Code、OpenCode、codeAgent、Hermes、NGA、**DeepSeek Harness（dsh，v1.24）** + 用户自定义 agent（PATH 检测、`--version` 探测、每 agent 启动参数）
+- **Markdown 编辑器**：所见即所得撰写 prompt，一键发送进终端；按仓库维度的问题历史
+- **结构化任务模式（v1.23）**：非交互一次性运行（Claude Code 走 `-p --output-format stream-json`），输出解析为事件时间线（助手消息 / 工具调用 / 运行边界）并 append-only 持久化为 JSONL；支持后台运行与取消
+- **会话搜索（v1.23）**：问题历史 + 任务事件日志的本地全文检索
+- **后台任务 + 系统通知（v1.24）**：后台任务运行条 + Electron Notification（点击回到窗口）/托盘气球通知
+- **Todo ↔ Agent 闭环（v1.24）**：任务编辑弹窗「🤖 交给 Agent」→ 预填任务提示词运行 agent 任务 → 完成后摘要自动回写任务备注
+
 ### 🗂 仓库导航（RepoNav）
 
 - 扫描本地 git 仓库（远程 URL、分支、最近提交），生成 `repo-nav/index.json` 索引
 - **AI 记忆**：LLM 阅读仓库元数据 + README 生成中文描述与 kebab-case 标签，纯本地检索（v1.22 起显示批次进度）
 - **命令模板**：一键在 Windows Terminal / PowerShell 中打开仓库并执行命令串（如 `git pull; opencode`）
+- **执行审批门（v1.23）**：危险命令（rm/del/git push --force/重定向等）执行前弹窗展示完整命令串，三档策略 + 审计日志
 - 与 Agent 对话联动：从仓库卡片直接跳转新建 Agent 会话
-
-### 💬 Agent 对话（AgentHub）
-
-- **会话管理**：保存（agent + 工作目录）会话，按仓库分组；**v1.22 起首个提问后由 LLM 自动生成会话标题**（手动改过的标题永不覆盖）
-- **嵌入式终端**：ConPTY（`@lydell/node-pty`）+ xterm.js 6，100% 原生 CLI 交互（斜杠命令、TUI、流式输出）
-- **CLI 助手支持**：Claude Code、OpenCode、codeAgent、Hermes、NGA + 用户自定义 agent（PATH 检测、`--version` 探测、每 agent 启动参数）
-- **Markdown 编辑器**：所见即所得撰写 prompt，一键发送进终端；按仓库维度的问题历史
 
 ### 🔒 数据安全与隐私
 
@@ -200,8 +205,10 @@ Intelligent-ToDo/
 - [x] ~~Agent 任务模式：结构化一次性运行（stream-json → 事件日志 → 可检索）~~（v1.23）
 - [x] ~~会话全文搜索~~（v1.23）
 - [x] ~~命令执行审批门~~（v1.23，dangerous/all/off 三档 + 审计日志）
-- [ ] 后台任务 + 托盘完成通知
-- [ ] Todo ↔ Agent 闭环（任务直接交给 agent 执行并回写摘要）
+- [x] ~~后台任务 + 托盘完成通知~~（v1.24）
+- [x] ~~Todo ↔ Agent 闭环（任务交给 agent 执行并回写摘要）~~（v1.24 轻量版）
+- [x] ~~dsh（DeepSeek Harness）作为内置 agent~~（v1.24）
+- [ ] dsh 插件式 `todo_write` 工具（agent 直接读写任务表，随 dsh 插件生态成熟推进）
 - [ ] MCP 客户端支持（视自建 agent loop 进度）
 
 ---

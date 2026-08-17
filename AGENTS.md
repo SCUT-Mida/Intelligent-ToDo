@@ -16,10 +16,13 @@
 关键横切模块：
 
 - `src/preload/index.ts` — contextBridge 白名单桥；**所有新 IPC 必须在这里加包装**
-- `src/shared/` — 双进程共享类型与常量；**IPC channel 名一律集中定义在此**（`agentHub.ts` 的 `AGENT_IPC`、`repoNav.ts` 的 `IPC`/`IPC_V2`），主进程与 preload 都从这 import，禁止裸写字符串
+- `src/shared/` — 双进程共享类型与常量；**IPC channel 名一律集中定义在此**（`agentHub.ts` 的 `AGENT_IPC`/`TASK_IPC`、`repoNav.ts` 的 `IPC`/`IPC_V2`），主进程与 preload 都从这 import，禁止裸写字符串
 - `src/main/aiClient.ts` — 唯一的 LLM 客户端（OpenAI 兼容；流式 SSE、429/5xx 退避重试、usage 提取）。**新功能调 LLM 一律走 `callLLM`**，并传 `usageSource` 计量
 - `src/main/netFetch.ts` — 代理感知 HTTP（Electron net；系统代理生效）。**禁止直接用 Node fetch/undici**
 - `src/main/tokenMeter.ts` — token 用量计量（按日/按来源）
+- `src/main/notify.ts` — 主进程通知总线；功能模块经 `notifyBus.fire()` 发系统通知，OS 层面（Notification/托盘气球）只在 `main/index.ts` 接线
+- `src/main/atomic.ts` — 原子写 JSON（tmp+rename）+ 损坏备份读取；**新的 JSON 持久化一律用它**
+- `src/main/agentHub/taskRunner.ts` + `eventLog.ts` + `streamJson.ts` — 结构化任务模式（非 PTY 一次性运行、JSONL 事件日志、Claude stream-json 解析）
 - `src/main/logger.ts` — 滚动日志；主进程日志一律走 logger，不裸 console
 - `scripts/repo-nav/` — 独立 PowerShell 模块，与 GUI 共享 index.json 数据格式（改动扫描/索引格式时需双向兼容）
 
