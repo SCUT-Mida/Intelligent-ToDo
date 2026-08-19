@@ -11,7 +11,8 @@ interface AppItem {
 const APP_LIST: AppItem[] = [
   { id: 'todo', name: '智能代办', icon: '📋', description: '任务管理看板' },
   { id: 'repoNav', name: '仓库导航', icon: '🧭', description: 'Git 仓库快速导航' },
-  { id: 'agentHub', name: 'Agent 对话', icon: '💬', description: '与 CLI AI 助手对话' }
+  { id: 'agentHub', name: 'Agent 对话', icon: '💬', description: '与 CLI AI 助手对话' },
+  { id: 'apiTool', name: 'API 调试', icon: '🌐', description: '免登录接口调试（GET/POST）' }
 ]
 
 export default function ActivityBar(): JSX.Element {

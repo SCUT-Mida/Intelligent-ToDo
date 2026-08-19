@@ -7,6 +7,7 @@ import UnifiedSettingsModal from './settings/UnifiedSettingsModal'
 const TodoApp = lazy(() => import('./apps/todoApp/TodoApp'))
 const RepoNavApp = lazy(() => import('./apps/repoNavApp/RepoNavApp'))
 const AgentHubApp = lazy(() => import('./apps/agentHubApp/AgentHubApp'))
+const ApiToolApp = lazy(() => import('./apps/apiToolApp/ApiToolApp'))
 
 function LoadingFallback(): JSX.Element {
   return (
@@ -32,7 +33,7 @@ export default function AppShell(): JSX.Element {
       <main className="app-shell__content">
         <Suspense fallback={<LoadingFallback />}>
           <div className="app-shell__app-stack">
-            {(['todo', 'repoNav', 'agentHub'] as const).map((name) => (
+            {(['todo', 'repoNav', 'agentHub', 'apiTool'] as const).map((name) => (
               <div
                 key={name}
                 className="app-shell__app-layer"
@@ -41,6 +42,7 @@ export default function AppShell(): JSX.Element {
                 {name === 'todo' && <TodoApp />}
                 {name === 'repoNav' && <RepoNavApp />}
                 {name === 'agentHub' && <AgentHubApp />}
+                {name === 'apiTool' && <ApiToolApp />}
               </div>
             ))}
           </div>

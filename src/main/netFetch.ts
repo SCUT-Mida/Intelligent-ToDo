@@ -13,6 +13,8 @@ import { net } from 'electron'
 export interface NetResponse {
   ok: boolean
   status: number
+  /** Response headers (multi-values joined with ', '). v1.25: needed by the API tool. */
+  headers: Record<string, string>
   json: () => Promise<unknown>
   text: () => Promise<string>
 }
@@ -25,8 +27,18 @@ export interface NetResponse {
 export interface NetStreamResponse {
   ok: boolean
   status: number
+  headers: Record<string, string>
   chunks: AsyncIterable<string>
   text: () => Promise<string>
+}
+
+/** Flatten Electron's response headers (string | string[] values) into a plain map. */
+function flattenHeaders(raw: Record<string, string | string[]>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    out[key] = Array.isArray(value) ? value.join(', ') : value
+  }
+  return out
 }
 
 /**
@@ -127,6 +139,7 @@ export function netFetchStream(
       resolve({
         ok: status >= 200 && status < 300,
         status,
+        headers: flattenHeaders(response.headers),
         chunks,
         text: () =>
           done
@@ -183,6 +196,7 @@ export function netFetch(
         resolve({
           ok: status >= 200 && status < 300,
           status,
+          headers: flattenHeaders(response.headers),
           json: () => Promise.resolve(JSON.parse(bodyStr)),
           text: () => Promise.resolve(bodyStr)
         })

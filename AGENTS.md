@@ -5,13 +5,14 @@
 
 ## 仓库地图
 
-三合一 Electron 桌面套件（产品名「本地AI工具集」，仅 Windows 发行）：
+四合一 Electron 桌面套件（产品名「本地AI工具集」，仅 Windows 发行）：
 
 | 子应用 | 主进程 | 渲染进程 |
 |--------|--------|----------|
 | 智能代办 todo | `src/main/index.ts`（todo IPC + aiRecommend） | `src/renderer/src/apps/todoApp/`、`components/*`（QuadrantBoard 等） |
 | 仓库导航 repoNav | `src/main/repoNav/`（scanner/launcher/aiMemory/config/userData） | `apps/repoNavApp/`、`components/RepoNav/` |
-| Agent 对话 agentHub | `src/main/agentHub/`（pty/detect/args/agentConfig/persistence） | `apps/agentHubApp/`、`components/AgentHub/` |
+| Agent 对话 agentHub | `src/main/agentHub/`（pty/detect/args/agentConfig/persistence/taskRunner） | `apps/agentHubApp/`、`components/AgentHub/` |
+| API 调试 apiTool | `src/main/apiTool/`（netFetch 执行 + api-tool.json 持久化） | `apps/apiToolApp/`、`components/ApiTool/` |
 
 关键横切模块：
 
@@ -29,7 +30,7 @@
 ## 进程与数据流
 
 - 经典三进程：main（全部"后端"逻辑 + 持久化）→ preload（白名单桥）→ renderer（React）
-- 渲染进程三应用**常驻挂载**（AppShell 用 display:none 切换）——这是嵌入式 PTY 会话存活的前提，**不要改成卸载式切换**
+- 渲染进程四应用**常驻挂载**（AppShell 用 display:none 切换）——这是嵌入式 PTY 会话存活的前提，**不要改成卸载式切换**
 - 持久化全部在 main、全部 userData 目录：损坏时先备份（`.corrupt-<ts>`）再回落默认；写盘用原子写（tmp + rename）
 - API Key 经 `src/main/crypto.ts`（safeStorage/DPAPI）加密后落盘；**任何日志/IPC 不得输出明文 Key**
 

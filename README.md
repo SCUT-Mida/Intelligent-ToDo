@@ -1,19 +1,20 @@
 # 本地AI工具集 · Intelligent-ToDo
 
-> 三合一本地 AI 桌面套件：智能代办 · 仓库导航 · Agent 对话。基于 Electron + React + TypeScript 构建，数据全部留在本地。
+> 四合一本地 AI 桌面套件：智能代办 · 仓库导航 · Agent 对话 · API 调试。基于 Electron + React + TypeScript 构建，数据全部留在本地。
 
 [![Build & Release](https://github.com/SCUT-Mida/Intelligent-ToDo/actions/workflows/release.yml/badge.svg)](https://github.com/SCUT-Mida/Intelligent-ToDo/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)](#-下载安装)
 [![Tests](https://img.shields.io/badge/tests-vitest-6e9c18.svg)](#-质量门禁)
 
-它从一个「艾森豪威尔矩阵 + AI 优先排序」的待办应用出发，逐步长成了本地开发者的 AI 工具集（安装包快捷方式名即「本地AI工具集」），包含三个子应用：
+它从一个「艾森豪威尔矩阵 + AI 优先排序」的待办应用出发，逐步长成了本地开发者的 AI 工具集（安装包快捷方式名即「本地AI工具集」），包含四个子应用：
 
 | 子应用 | 一句话介绍 |
 |--------|-----------|
 | 📋 **智能代办** | 四象限任务看板 + AI「今日优先」工作台（流式输出、节假日感知） |
 | 🗂 **仓库导航** | 本地 git 仓库扫描索引 + AI 仓库记忆 + 一键在终端打开并执行命令模板 |
 | 💬 **Agent 对话** | CLI AI 编程助手会话管理器：嵌入式终端（ConPTY + xterm.js）运行 Claude Code / OpenCode 等原生 TUI |
+| 🌐 **API 调试** | 免登录接口调试工具（GET/POST），内网友好，收藏与历史全本地 |
 
 ---
 
@@ -44,6 +45,17 @@
 - **命令模板**：一键在 Windows Terminal / PowerShell 中打开仓库并执行命令串（如 `git pull; opencode`）
 - **执行审批门（v1.23）**：危险命令（rm/del/git push --force/重定向等）执行前弹窗展示完整命令串，三档策略 + 审计日志
 - 与 Agent 对话联动：从仓库卡片直接跳转新建 Agent 会话
+
+### 🌐 API 调试（v1.25 新增）
+
+为内网环境打造的免登录接口调试工具——Postman 的核心能力，没有任何账号门槛：
+
+- **请求构建**：GET / POST、Query 参数、Headers（键值行 + 单行启用/禁用）、Body（JSON 带格式化与合法性校验 / 原始文本）
+- **响应查看**：状态码（按 2xx/3xx/4xx+ 着色）、耗时、体积、响应头折叠表、响应体「美化/原文」切换（JSON 自动缩进）+ 一键复制
+- **请求收藏**：保存常用请求（可重命名/删除），侧栏点击即载入
+- **历史记录**：最近 50 条请求自动留痕（含状态码与耗时），点击一键还原完整请求
+- **内网友好**：请求在主进程经 Electron net 发出（系统代理自动生效）；URL/参数/Header 校验与错误提示全中文
+- **零账号**：所有收藏与历史存于本地 `api-tool.json`（原子写 + 损坏备份）
 
 ### 🔒 数据安全与隐私
 
@@ -208,6 +220,8 @@ Intelligent-ToDo/
 - [x] ~~后台任务 + 托盘完成通知~~（v1.24）
 - [x] ~~Todo ↔ Agent 闭环（任务交给 agent 执行并回写摘要）~~（v1.24 轻量版）
 - [x] ~~dsh（DeepSeek Harness）作为内置 agent~~（v1.24）
+- [x] ~~API 调试工具（免登录 Postman-lite，GET/POST）~~（v1.25）
+- [ ] API 调试：环境变量（{{baseUrl}} 切换测试/生产）与请求集合（collections）
 - [ ] dsh 插件式 `todo_write` 工具（agent 直接读写任务表，随 dsh 插件生态成熟推进）
 - [ ] MCP 客户端支持（视自建 agent loop 进度）
 

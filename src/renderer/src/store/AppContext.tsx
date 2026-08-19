@@ -3,7 +3,7 @@ import type { AppData, AppConfig } from '@shared/types'
 import { createDefaultData } from '@shared/types'
 
 // TODO: replace with shared type when backend lands
-export type AppId = 'todo' | 'repoNav' | 'agentHub'
+export type AppId = 'todo' | 'repoNav' | 'agentHub' | 'apiTool'
 
 export interface AppState {
   data: AppData

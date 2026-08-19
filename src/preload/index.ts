@@ -18,6 +18,8 @@ import type {
   TaskEvent,
   SessionSearchHit
 } from '../shared/agentHub'
+import { API_TOOL_IPC } from '../shared/apiTool'
+import type { ApiRequestSpec, ApiResponseResult, ApiToolData } from '../shared/apiTool'
 
 // V2 IPC channels for AI memory features (will be moved to shared IPC_V2 when backend lands)
 const IPC_V2_LOCAL = {
@@ -137,6 +139,27 @@ try {
 
 export type Api = typeof api
 export type RepoNavApi = typeof repoNav
+
+// ── API Tool API ────────────────────────────────────────────────────────────
+
+const apiTool = {
+  /** Execute one HTTP request in the main process. Never rejects. */
+  send: (spec: ApiRequestSpec): Promise<ApiResponseResult> =>
+    ipcRenderer.invoke(API_TOOL_IPC.SEND, spec),
+  /** Load persisted data (saved requests + history). */
+  getData: (): Promise<ApiToolData> => ipcRenderer.invoke(API_TOOL_IPC.GET_DATA),
+  /** Persist full data (renderer is source of truth). */
+  saveData: (data: ApiToolData): Promise<boolean> =>
+    ipcRenderer.invoke(API_TOOL_IPC.SAVE_DATA, data)
+}
+
+try {
+  contextBridge.exposeInMainWorld('apiTool', apiTool)
+} catch (error) {
+  console.error(error)
+}
+
+export type ApiToolApi = typeof apiTool
 
 // ── Agent Hub API ───────────────────────────────────────────────────────────
 

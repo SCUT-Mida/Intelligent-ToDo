@@ -199,7 +199,7 @@ export interface LoadResult {
 
 // ── Multi-app collection types ───────────────────────────────────────────────
 
-export type AppId = 'todo' | 'repoNav' | 'agentHub'
+export type AppId = 'todo' | 'repoNav' | 'agentHub' | 'apiTool'
 
 export interface AppManifest {
   id: AppId
@@ -212,4 +212,5 @@ export const APP_LIST: AppManifest[] = [
   { id: 'todo', name: '智能代办', icon: '📋', description: '艾森豪威尔矩阵 + AI 优先级推荐' },
   { id: 'repoNav', name: '仓库导航', icon: '🗂', description: '本地代码仓快速查找 + AI 语义搜索' },
   { id: 'agentHub', name: 'Agent 对话', icon: '💬', description: '与 CLI AI 助手对话 · 会话管理 · 实时日志' },
+  { id: 'apiTool', name: 'API 调试', icon: '🌐', description: '免登录接口调试（GET/POST）· 内网友好' },
 ]
