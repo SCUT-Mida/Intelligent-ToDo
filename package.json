@@ -1,7 +1,7 @@
 {
   "name": "intelligent-todo",
   "productName": "Intelligent-ToDo",
-  "version": "1.25.0",
+  "version": "1.25.1",
   "description": "本地AI工具集 - Smart Todo, Repo Navigator, Agent Hub & API Tester desktop suite",
   "main": "./out/main/index.js",
   "author": "intelligent-todo",

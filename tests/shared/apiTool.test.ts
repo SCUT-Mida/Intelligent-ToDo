@@ -4,7 +4,9 @@ import {
   buildHeaderMap,
   validateJsonBody,
   prettyJsonBody,
-  createApiKeyValue
+  createApiKeyValue,
+  classifyNetError,
+  normalizeApiToolSettings
 } from '../../src/shared/apiTool'
 
 describe('buildFinalUrl', () => {
@@ -104,5 +106,63 @@ describe('prettyJsonBody', () => {
 
   it('returns the original for malformed JSON', () => {
     expect(prettyJsonBody('{"broken":')).toBe('{"broken":')
+  })
+})
+
+describe('classifyNetError (v1.25.1)', () => {
+  it('extracts the net::ERR code from raw messages', () => {
+    expect(classifyNetError('请求失败：net::ERR_CERT_AUTHORITY_INVALID。').code).toBe(
+      'ERR_CERT_AUTHORITY_INVALID'
+    )
+    expect(classifyNetError('no code here').code).toBe('')
+  })
+
+  it('certificate errors suggest ignoreCert', () => {
+    for (const code of ['ERR_CERT_AUTHORITY_INVALID', 'ERR_CERT_COMMON_NAME_INVALID', 'ERR_SSL_PROTOCOL_ERROR']) {
+      const cls = classifyNetError(`net::${code}`)
+      expect(cls.suggestFix).toBe('ignoreCert')
+      expect(cls.cause).toContain('证书')
+    }
+  })
+
+  it('proxy/tunnel errors suggest direct', () => {
+    for (const code of ['ERR_TUNNEL_CONNECTION_FAILED', 'ERR_PROXY_CONNECTION_FAILED']) {
+      expect(classifyNetError(`net::${code}`).suggestFix).toBe('direct')
+    }
+  })
+
+  it('connection issues suggest direct; DNS issues have no fix', () => {
+    expect(classifyNetError('net::ERR_CONNECTION_TIMED_OUT').suggestFix).toBe('direct')
+    expect(classifyNetError('net::ERR_CONNECTION_REFUSED').suggestFix).toBe('direct')
+    expect(classifyNetError('net::ERR_NAME_NOT_RESOLVED').suggestFix).toBeNull()
+  })
+
+  it('unclassified codes get a generic cause', () => {
+    const cls = classifyNetError('net::ERR_INCOMPLETE_CHUNKED_ENCODING')
+    expect(cls.suggestFix).toBeNull()
+    expect(cls.cause).toBeTruthy()
+  })
+})
+
+describe('normalizeApiToolSettings (v1.25.1)', () => {
+  it('falls back to safe defaults for missing/legacy data', () => {
+    expect(normalizeApiToolSettings(undefined)).toEqual({
+      proxyMode: 'system',
+      ignoreCert: false,
+      timeoutMs: 30000
+    })
+    expect(normalizeApiToolSettings({})).toEqual(normalizeApiToolSettings(undefined))
+  })
+
+  it('keeps valid values and clamps the timeout', () => {
+    expect(
+      normalizeApiToolSettings({ proxyMode: 'direct', ignoreCert: true, timeoutMs: 5000 })
+    ).toEqual({ proxyMode: 'direct', ignoreCert: true, timeoutMs: 5000 })
+    expect(normalizeApiToolSettings({ timeoutMs: 10 }).timeoutMs).toBe(30000) // too small
+    expect(normalizeApiToolSettings({ timeoutMs: 999999 }).timeoutMs).toBe(300000) // clamp max
+  })
+
+  it('ignores invalid proxyMode values', () => {
+    expect(normalizeApiToolSettings({ proxyMode: 'socks' as 'direct' }).proxyMode).toBe('system')
   })
 })

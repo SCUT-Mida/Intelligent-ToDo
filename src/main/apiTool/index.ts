@@ -1,34 +1,49 @@
 /**
- * API 调试工具 — IPC handler registration + persistence (v1.25).
+ * API 调试工具 — IPC handler registration + persistence + network session.
  *
  * A login-free Postman-lite for internal networks. The renderer builds an
- * ApiRequestSpec; this module executes it in the MAIN process via netFetch
- * (Electron net → system-proxy aware, per the repo's "no renderer fetch /
- * no Node undici" rule) and returns a structured ApiResponseResult.
+ * ApiRequestSpec; this module executes it in the MAIN process and returns a
+ * structured ApiResponseResult.
+ *
+ * v1.25.1 — intranet survival kit: requests run on a DEDICATED Electron
+ * session (partition 'api-tool') so the user can, per ApiToolSettings:
+ *   - bypass the system proxy ('direct') — proxies often refuse to route
+ *     private IP ranges, which failed EVERY request with tunnel errors
+ *   - accept self-signed / corporate-MITM certificates — corporate proxies
+ *     re-sign HTTPS with a private CA, so the server really did handle the
+ *     request while Chromium rejected the response certificate
+ *   - tune the timeout
+ * The default (and all other app traffic, e.g. LLM calls) stays on the
+ * default session with system proxy + full certificate verification.
  *
  * Persisted at <userData>/api-tool.json using the shared atomic-write +
  * corrupt-backup pattern.
  */
 
-import { ipcMain, app } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import { ipcMain, app, session } from 'electron'
+import type { IpcMainInvokeEvent, Session } from 'electron'
 import { join } from 'path'
 import { existsSync, copyFileSync } from 'fs'
 import { API_TOOL_IPC } from '../../shared/apiTool'
 import type {
   ApiRequestSpec,
   ApiResponseResult,
-  ApiToolData
+  ApiToolData,
+  ApiToolSettings
 } from '../../shared/apiTool'
-import { buildFinalUrl, buildHeaderMap, validateJsonBody } from '../../shared/apiTool'
-import { createDefaultApiToolData, API_HISTORY_LIMIT } from '../../shared/apiTool'
+import {
+  buildFinalUrl,
+  buildHeaderMap,
+  validateJsonBody,
+  createDefaultApiToolData,
+  normalizeApiToolSettings,
+  API_HISTORY_LIMIT
+} from '../../shared/apiTool'
 import { writeJsonAtomic } from '../atomic'
 import { netFetch } from '../netFetch'
 import { logger } from '../logger'
 
 const DATA_FILE = join(app.getPath('userData'), 'api-tool.json')
-
-const REQUEST_TIMEOUT_MS = 30000
 
 // ── Persistence ─────────────────────────────────────────────────────────────
 
@@ -45,6 +60,7 @@ export function loadApiToolData(): ApiToolData {
       version: 1,
       requests: Array.isArray(parsed.requests) ? parsed.requests : [],
       history: Array.isArray(parsed.history) ? parsed.history.slice(-API_HISTORY_LIMIT) : [],
+      settings: normalizeApiToolSettings(parsed.settings),
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString()
     }
   } catch (err) {
@@ -67,20 +83,64 @@ export function saveApiToolData(data: ApiToolData): void {
     version: 1,
     requests: data.requests,
     history: data.history.slice(-API_HISTORY_LIMIT),
+    settings: normalizeApiToolSettings(data.settings),
     updatedAt: new Date().toISOString()
   }
   writeJsonAtomic(DATA_FILE, payload)
+}
+
+// ── Dedicated network session (proxy / certificate policy) ─────────────────
+
+let cachedSession: Session | null = null
+let cachedSettingsKey = ''
+
+/**
+ * Return a session for the CURRENT settings. Whenever settings change we
+ * build a session on a FRESH partition (generation counter) instead of
+ * mutating the old one — Chromium pools keep-alive connections per session,
+ * so a connection accepted under `ignoreCert` would otherwise stay usable
+ * after the user turns the option back off. A new partition guarantees the
+ * new policy applies immediately; stale partitions are cache-less,
+ * in-memory only, and die with the app.
+ */
+function getApiToolSession(settings: ApiToolSettings): Session {
+  const key = JSON.stringify(settings)
+  if (cachedSettingsKey !== key || !cachedSession) {
+    const gen = key === '' ? 0 : simpleHash(key)
+    cachedSession = session.fromPartition(`api-tool-${gen}`, { cache: false })
+    // Proxy: 'direct' bypasses the OS proxy entirely (intranet routes);
+    // 'system' restores Chromium's default behavior.
+    void cachedSession
+      .setProxy(settings.proxyMode === 'direct' ? { mode: 'direct' } : { mode: 'system' })
+      .catch((err) => logger.warn('apiTool:session', 'setProxy failed', { error: String(err) }))
+    // Certificate verification: accept everything when the user opted in.
+    if (settings.ignoreCert) {
+      cachedSession.setCertificateVerifyProc((_request, callback) => callback(0))
+    }
+    cachedSettingsKey = key
+    logger.info('apiTool:session', 'session (re)created for settings', { ...settings })
+  }
+  return cachedSession
+}
+
+/** Tiny stable string hash → partition generation id. */
+function simpleHash(s: string): string {
+  let h = 0
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0
+  }
+  return String(Math.abs(h))
 }
 
 // ── Request execution ───────────────────────────────────────────────────────
 
 /**
  * Execute one request. Never throws — network/timeout/URL problems become
- * `ApiResponseResult { ok: false, error }` with actionable Chinese messages
- * (mirrors classifyLlmError's tone).
+ * `ApiResponseResult { ok: false, error, errorCode }` with actionable
+ * Chinese messages (mirrors classifyLlmError's tone).
  */
-async function executeRequest(spec: ApiRequestSpec): Promise<ApiResponseResult> {
-  const empty = (error: string): ApiResponseResult => ({
+async function executeRequest(spec: ApiRequestSpec, settings: ApiToolSettings): Promise<ApiResponseResult> {
+  const empty = (error: string, errorCode?: string): ApiResponseResult => ({
     ok: false,
     status: 0,
     statusText: '',
@@ -88,7 +148,8 @@ async function executeRequest(spec: ApiRequestSpec): Promise<ApiResponseResult> 
     body: '',
     durationMs: 0,
     sizeBytes: 0,
-    error
+    error,
+    errorCode
   })
 
   const rawUrl = spec.url.trim()
@@ -112,12 +173,11 @@ async function executeRequest(spec: ApiRequestSpec): Promise<ApiResponseResult> 
     if (jsonError) return empty(jsonError)
   }
   const headerMap = buildHeaderMap(spec.headers, bodyType)
-  const bodyText = bodyType === 'none' || bodyType === 'text' || bodyType === 'json'
-    ? (bodyType === 'none' ? undefined : spec.body.trim() === '' ? undefined : spec.body)
-    : undefined
+  const bodyText =
+    bodyType === 'none' || spec.body.trim() === '' ? undefined : spec.body
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), settings.timeoutMs)
   const startedAt = Date.now()
 
   try {
@@ -125,7 +185,8 @@ async function executeRequest(spec: ApiRequestSpec): Promise<ApiResponseResult> 
       method: spec.method,
       headers: headerMap,
       body: spec.method === 'POST' ? bodyText : undefined,
-      signal: controller.signal
+      signal: controller.signal,
+      session: getApiToolSession(settings)
     })
     const durationMs = Date.now() - startedAt
     const body = await resp.text().catch(() => '')
@@ -141,10 +202,13 @@ async function executeRequest(spec: ApiRequestSpec): Promise<ApiResponseResult> 
   } catch (err) {
     const durationMs = Date.now() - startedAt
     if (err instanceof Error && err.name === 'AbortError') {
-      return empty(`请求超时（${Math.round(REQUEST_TIMEOUT_MS / 1000)} 秒无响应）。请检查目标服务是否可达，或网络/代理设置。`)
+      return empty(
+        `请求超时（${Math.round(settings.timeoutMs / 1000)} 秒无响应）。请检查目标服务是否可达，或在 API 调试设置中调大超时。`
+      )
     }
     const detail = err instanceof Error ? err.message : String(err)
-    return empty(`请求失败：${detail}。请检查目标地址、端口与网络连通性。`)
+    const code = (detail.match(/net::(ERR_[A-Z_]+)/) ?? [])[1] ?? ''
+    return empty(`请求失败：${detail}`, code ? `net::${code}` : undefined)
   } finally {
     clearTimeout(timeout)
   }
@@ -153,18 +217,28 @@ async function executeRequest(spec: ApiRequestSpec): Promise<ApiResponseResult> 
 // ── Handler registration ────────────────────────────────────────────────────
 
 export function registerApiToolIpc(ipc: typeof ipcMain): void {
-  ipc.handle(API_TOOL_IPC.SEND, async (_e: IpcMainInvokeEvent, spec: ApiRequestSpec): Promise<ApiResponseResult> => {
-    const result = await executeRequest(spec)
-    logger.info('apiTool', 'request executed', {
-      method: spec.method,
-      url: spec.url,
-      ok: result.ok,
-      status: result.status,
-      durationMs: result.durationMs,
-      sizeBytes: result.sizeBytes
-    })
-    return result
-  })
+  ipc.handle(
+    API_TOOL_IPC.SEND,
+    async (_e: IpcMainInvokeEvent, spec: ApiRequestSpec, settings?: Partial<ApiToolSettings>): Promise<ApiResponseResult> => {
+      // Settings arrive WITH the request (race-free for the one-click-fix
+      // re-send, which hasn't hit disk yet via the debounced save); fall
+      // back to persisted settings when omitted.
+      const effective = normalizeApiToolSettings(settings ?? loadApiToolData().settings)
+      const result = await executeRequest(spec, effective)
+      logger.info('apiTool', 'request executed', {
+        method: spec.method,
+        url: spec.url,
+        ok: result.ok,
+        status: result.status,
+        durationMs: result.durationMs,
+        sizeBytes: result.sizeBytes,
+        errorCode: result.errorCode,
+        proxyMode: effective.proxyMode,
+        ignoreCert: effective.ignoreCert
+      })
+      return result
+    }
+  )
 
   ipc.handle(API_TOOL_IPC.GET_DATA, (): ApiToolData => loadApiToolData())
 

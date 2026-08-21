@@ -4,12 +4,19 @@ import type {
   ApiResponseResult,
   ApiToolData,
   ApiHistoryEntry,
+  ApiToolSettings,
   SavedApiRequest
 } from '@shared/apiTool'
-import { createDefaultApiToolData, createDefaultApiRequestSpec, API_HISTORY_LIMIT } from '@shared/apiTool'
+import {
+  createDefaultApiToolData,
+  createDefaultApiRequestSpec,
+  normalizeApiToolSettings,
+  API_HISTORY_LIMIT
+} from '@shared/apiTool'
 import ApiSidebar from '../../components/ApiTool/ApiSidebar'
 import ApiRequestEditor from '../../components/ApiTool/ApiRequestEditor'
 import ApiResponsePanel from '../../components/ApiTool/ApiResponsePanel'
+import ApiSettingsDialog from '../../components/ApiTool/ApiSettingsDialog'
 import '../../styles/apiTool.css'
 
 /**
@@ -28,13 +35,19 @@ export default function ApiToolApp(): JSX.Element {
   const [response, setResponse] = useState<ApiResponseResult | null>(null)
   const [sending, setSending] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // Ref mirrors for the persistence effect + async callbacks.
   const dataRef = useRef(data)
   dataRef.current = data
   const specRef = useRef(spec)
   specRef.current = spec
-
+  // Network settings ref — send() passes these along with every request.
+  const settingsRef = useRef<ApiToolSettings>(normalizeApiToolSettings(undefined))
+  const setSettingsAndSync = useCallback((next: ApiToolSettings): void => {
+    settingsRef.current = next
+    setData((prev) => ({ ...prev, settings: next }))
+  }, [])
   // Load persisted data on mount.
   useEffect(() => {
     void (async () => {
@@ -68,11 +81,11 @@ export default function ApiToolApp(): JSX.Element {
 
   // ── Actions ─────────────────────────────────────────────────────────────
 
-  const handleSend = useCallback(async (): Promise<void> => {
+  const handleSend = useCallback(async (overrideSettings?: ApiToolSettings): Promise<void> => {
     setSending(true)
     setResponse(null)
     try {
-      const result = await window.apiTool.send(specRef.current)
+      const result = await window.apiTool.send(specRef.current, overrideSettings ?? settingsRef.current)
       setResponse(result)
       // Record history (spec snapshot + outcome), newest last, capped.
       const entry: ApiHistoryEntry = {
@@ -184,6 +197,41 @@ export default function ApiToolApp(): JSX.Element {
     setSpec((prev) => ({ ...prev, name }))
   }, [])
 
+  // ── Network settings (v1.25.1) ─────────────────────────────────────────
+
+  const settings = normalizeApiToolSettings(data.settings)
+
+  // Keep the ref in sync whenever persisted settings change (e.g. saved
+  // via the settings dialog).
+  useEffect(() => {
+    settingsRef.current = settings
+  }, [settings])
+
+  const handleSaveSettings = useCallback((next: ApiToolSettings): void => {
+    setSettingsAndSync(next)
+    setSettingsOpen(false)
+    showFlash('网络设置已保存，对下一次发送生效')
+  }, [setSettingsAndSync, showFlash])
+
+  /** One-click fix from the error card: flip the setting, persist, re-send. */
+  const handleApplyFix = useCallback((fix: 'ignoreCert' | 'direct'): void => {
+    const next = normalizeApiToolSettings(dataRef.current.settings)
+    if (fix === 'ignoreCert') {
+      next.ignoreCert = true
+    } else {
+      next.proxyMode = 'direct'
+    }
+    setSettingsAndSync(next)
+    showFlash(
+      fix === 'ignoreCert'
+        ? '已开启「忽略证书校验」，正在重发…'
+        : '已切换「直连（不走代理）」，正在重发…'
+    )
+    // Re-send immediately; settings ride along with the request, so no
+    // dependency on the debounced disk persist.
+    void handleSend(next)
+  }, [handleSend, setSettingsAndSync, showFlash])
+
   return (
     <div className="api-tool">
       <ApiSidebar
@@ -215,6 +263,13 @@ export default function ApiToolApp(): JSX.Element {
               placeholder="请求名称（收藏时显示）"
               spellCheck={false}
             />
+            <button
+              className={`btn btn--ghost api-tool__net-btn ${settings.proxyMode === 'direct' || settings.ignoreCert ? 'api-tool__net-btn--custom' : ''}`}
+              onClick={() => setSettingsOpen(true)}
+              title={`网络设置（内网选项）\n当前：${settings.proxyMode === 'direct' ? '直连' : '系统代理'} · ${settings.ignoreCert ? '忽略证书校验' : '校验证书'} · 超时 ${Math.round(settings.timeoutMs / 1000)}s`}
+            >
+              ⚙ 网络
+            </button>
           </div>
           <ApiRequestEditor
             spec={spec}
@@ -226,9 +281,17 @@ export default function ApiToolApp(): JSX.Element {
         </div>
 
         <div className="api-tool__response-pane">
-          <ApiResponsePanel response={response} sending={sending} />
+          <ApiResponsePanel response={response} sending={sending} onApplyFix={handleApplyFix} />
         </div>
       </div>
+
+      {settingsOpen && (
+        <ApiSettingsDialog
+          settings={settings}
+          onSave={handleSaveSettings}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   )
 }

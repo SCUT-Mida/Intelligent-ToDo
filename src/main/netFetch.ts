@@ -9,6 +9,20 @@
  */
 
 import { net } from 'electron'
+import type { Session } from 'electron'
+
+export interface NetFetchOptions {
+  method?: string
+  headers?: Record<string, string>
+  body?: string
+  signal?: AbortSignal
+  /**
+   * Execute on a dedicated Electron session instead of the default one
+   * (v1.25.1: the API tool uses its own partition to apply proxy-mode and
+   * certificate settings without touching the AI/LLM traffic).
+   */
+  session?: Session
+}
 
 export interface NetResponse {
   ok: boolean
@@ -50,10 +64,14 @@ function flattenHeaders(raw: Record<string, string | string[]>): Record<string, 
  */
 export function netFetchStream(
   url: string,
-  options: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal } = {}
+  options: NetFetchOptions = {}
 ): Promise<NetStreamResponse> {
   return new Promise((resolve, reject) => {
-    const request = net.request({ method: options.method ?? 'GET', url })
+    const request = net.request({
+      method: options.method ?? 'GET',
+      url,
+      ...(options.session ? { session: options.session } : {})
+    })
 
     if (options.headers) {
       for (const [key, value] of Object.entries(options.headers)) {
@@ -166,10 +184,14 @@ export function netFetchStream(
 
 export function netFetch(
   url: string,
-  options: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal } = {}
+  options: NetFetchOptions = {}
 ): Promise<NetResponse> {
   return new Promise((resolve, reject) => {
-    const request = net.request({ method: options.method ?? 'GET', url })
+    const request = net.request({
+      method: options.method ?? 'GET',
+      url,
+      ...(options.session ? { session: options.session } : {})
+    })
 
     if (options.headers) {
       for (const [key, value] of Object.entries(options.headers)) {

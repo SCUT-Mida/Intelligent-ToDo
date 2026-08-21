@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 import type { ApiResponseResult } from '@shared/apiTool'
-import { prettyJsonBody } from '@shared/apiTool'
+import { prettyJsonBody, classifyNetError } from '@shared/apiTool'
 
 interface ApiResponsePanelProps {
   response: ApiResponseResult | null
   sending: boolean
+  /** v1.25.1: one-click fixes offered for classified network errors. */
+  onApplyFix?: (fix: 'ignoreCert' | 'direct') => void
 }
 
 function statusClass(status: number): string {
@@ -31,9 +33,11 @@ async function copyText(text: string): Promise<void> {
 /**
  * Response viewer — status/time/size strip, pretty/raw body toggle (JSON
  * pretty-printed with 2-space indent), collapsible response headers, and a
- * copy button. Network errors render as an actionable error card.
+ * copy button. Network errors render as an actionable error card that
+ * classifies the Chromium error code and offers one-click setting fixes
+ * (v1.25.1).
  */
-export default function ApiResponsePanel({ response, sending }: ApiResponsePanelProps): JSX.Element {
+export default function ApiResponsePanel({ response, sending, onApplyFix }: ApiResponsePanelProps): JSX.Element {
   const [view, setView] = useState<'pretty' | 'raw'>('pretty')
   const [headersOpen, setHeadersOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -72,12 +76,27 @@ export default function ApiResponsePanel({ response, sending }: ApiResponsePanel
   }
 
   if (!response.ok) {
+    const cls = classifyNetError(`${response.error ?? ''} ${response.errorCode ?? ''}`)
     return (
       <div className="api-response api-response--error">
         <div className="api-response__error-head">❌ 请求未成功</div>
+        {response.errorCode && (
+          <div className="api-response__error-code" title="Chromium 网络错误码">{response.errorCode}</div>
+        )}
         <div className="api-response__error-msg">{response.error ?? '未知错误'}</div>
+        {cls.code && (
+          <div className="api-response__error-cause">
+            <strong>原因分析：</strong>
+            {cls.cause}
+          </div>
+        )}
+        {cls.suggestFix && onApplyFix && (
+          <button className="btn btn--primary api-response__fix" onClick={() => onApplyFix(cls.suggestFix as 'ignoreCert' | 'direct')}>
+            {cls.suggestFix === 'ignoreCert' ? '一键开启「忽略证书校验」并重发' : '一键切换「直连（不走代理）」并重发'}
+          </button>
+        )}
         <div className="api-response__error-hint">
-          常见原因：目标服务未启动 / 端口不对 / 内网不通 / 代理拦截。请检查 URL 与网络后重试。
+          也可在 API 调试的 ⚙ 网络设置中调整代理模式 / 证书校验 / 超时。
         </div>
       </div>
     )

@@ -66,6 +66,51 @@ export interface ApiResponseResult {
   sizeBytes: number
   /** Chinese, actionable error message when ok is false. */
   error?: string
+  /** Chromium error code when ok is false, e.g. 'net::ERR_CERT_AUTHORITY_INVALID'. */
+  errorCode?: string
+}
+
+/** Classification of a network failure → actionable Chinese guidance. */
+export interface NetErrorClassification {
+  /** The net::ERR_* code extracted from the raw message ('' when none). */
+  code: string
+  /** One-line Chinese cause description. */
+  cause: string
+  /** Suggested setting fix; null when no setting applies. */
+  suggestFix: 'ignoreCert' | 'direct' | null
+}
+
+/**
+ * Map a raw network error message to a classification with a suggested
+ * settings fix. Pure function — unit tested in tests/shared/apiTool.test.ts.
+ */
+export function classifyNetError(message: string): NetErrorClassification {
+  const code = (message.match(/net::(ERR_[A-Z_]+)/) ?? [])[1] ?? ''
+  if (/CERT_|SSL_|HTTPS/.test(code)) {
+    return {
+      code,
+      cause: 'TLS 证书校验失败——常见于内网自签名证书，或公司代理用自己的 CA 解密 HTTPS。',
+      suggestFix: 'ignoreCert'
+    }
+  }
+  if (/PROXY|TUNNEL/.test(code)) {
+    return {
+      code,
+      cause: '系统代理拒绝转发该请求——常见于代理不路由内网地址。',
+      suggestFix: 'direct'
+    }
+  }
+  if (code === 'ERR_CONNECTION_TIMED_OUT' || code === 'ERR_TIMED_OUT' || code === 'ERR_CONNECTION_REFUSED') {
+    return {
+      code,
+      cause: '连接不上目标服务——检查地址/端口，或尝试绕过代理直连。',
+      suggestFix: 'direct'
+    }
+  }
+  if (code === 'ERR_NAME_NOT_RESOLVED') {
+    return { code, cause: '域名解析失败——检查 URL 拼写，或本机 DNS/代理配置。', suggestFix: null }
+  }
+  return { code, cause: '网络层错误，详见错误码。', suggestFix: null }
 }
 
 // ── Persistence types ───────────────────────────────────────────────────────
@@ -74,6 +119,40 @@ export interface SavedApiRequest extends ApiRequestSpec {
   id: string
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * Network behavior settings (v1.25.1) — the "intranet survival kit".
+ * Internal networks commonly break HTTP clients in two ways:
+ * corporate proxies that MITM HTTPS with a private CA (cert errors) and
+ * proxies that refuse to route private IP ranges (tunnel errors). Both
+ * are toggleable here; defaults stay safe (system proxy + cert checks).
+ */
+export interface ApiToolSettings {
+  /** 'system' honors the OS proxy; 'direct' bypasses it (intranet-friendly). */
+  proxyMode: 'system' | 'direct'
+  /** Accept self-signed / corporate-CA certificates. Off by default. */
+  ignoreCert: boolean
+  /** Request timeout in ms. Default 30000. */
+  timeoutMs: number
+}
+
+export const DEFAULT_API_TOOL_SETTINGS: ApiToolSettings = {
+  proxyMode: 'system',
+  ignoreCert: false,
+  timeoutMs: 30000
+}
+
+/** Merge persisted (possibly partial/legacy) settings onto defaults. */
+export function normalizeApiToolSettings(raw: Partial<ApiToolSettings> | undefined): ApiToolSettings {
+  return {
+    proxyMode: raw?.proxyMode === 'direct' ? 'direct' : 'system',
+    ignoreCert: raw?.ignoreCert === true,
+    timeoutMs:
+      typeof raw?.timeoutMs === 'number' && Number.isFinite(raw.timeoutMs) && raw.timeoutMs >= 1000
+        ? Math.min(raw.timeoutMs, 300000)
+        : DEFAULT_API_TOOL_SETTINGS.timeoutMs
+  }
 }
 
 /** One history entry — a snapshot of the spec + outcome, newest last. */
@@ -93,13 +172,21 @@ export interface ApiToolData {
   version: 1
   requests: SavedApiRequest[]
   history: ApiHistoryEntry[]
+  /** Network behavior settings (v1.25.1+; undefined in older data). */
+  settings?: ApiToolSettings
   updatedAt: string
 }
 
 export const API_HISTORY_LIMIT = 50
 
 export function createDefaultApiToolData(): ApiToolData {
-  return { version: 1, requests: [], history: [], updatedAt: new Date().toISOString() }
+  return {
+    version: 1,
+    requests: [],
+    history: [],
+    settings: { ...DEFAULT_API_TOOL_SETTINGS },
+    updatedAt: new Date().toISOString()
+  }
 }
 
 /** Blank editable spec used by the "new request" state. */
