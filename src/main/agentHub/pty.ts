@@ -311,12 +311,22 @@ export function buildPtyEnv(): Record<string, string> {
 
   // Common Windows user-level bin directories — same set as buildSpawnTarget
   // and detect.ts, kept in sync.
+  // Git dirs are included since v1.25.2: packaged Electron's sanitized PATH
+  // may lack them, which breaks AGENT-SIDE tooling that shells out to git
+  // (e.g. Claude-Code-style wrappers resolving the repo for server-side
+  // whitelist checks) even though the agent itself was resolved via
+  // buildSpawnTarget.
   const extraDirs = [
     join(process.env.APPDATA ?? '', 'npm'),
     join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Python'),
     join(process.env.USERPROFILE ?? '', '.cargo', 'bin'),
     join(process.env.USERPROFILE ?? '', '.local', 'bin'),
-    join(process.env.LOCALAPPDATA ?? '', 'Microsoft', 'WindowsApps')
+    join(process.env.LOCALAPPDATA ?? '', 'Microsoft', 'WindowsApps'),
+    // Git — system, 32-bit, per-user, and scoop installs.
+    join(process.env.ProgramFiles ?? '', 'Git', 'cmd'),
+    join(process.env['ProgramFiles(x86)'] ?? '', 'Git', 'cmd'),
+    join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Git', 'cmd'),
+    join(process.env.USERPROFILE ?? '', 'scoop', 'shims')
   ].filter((d) => d && existsSync(d))
 
   if (extraDirs.length > 0) {
@@ -330,7 +340,7 @@ export function buildPtyEnv(): Record<string, string> {
       env.PATH = currentPath
         ? currentPath + ';' + missing.join(';')
         : missing.join(';')
-      logger.info('agentHub:pty', 'augmented PATH for PTY', { added: missing.length })
+      logger.info('agentHub:pty', 'augmented PATH for PTY', { added: missing.length, dirs: missing })
     }
   }
 
@@ -383,6 +393,24 @@ export function createPty(
       cwd: workDir || undefined,
       env: buildPtyEnv()
     }) as IPty
+
+    // Diagnostic (v1.25.2): log whether `git` resolves from the PTY env —
+    // agents that identify the repo by shelling out to git fail confusingly
+    // (e.g. server-side whitelist checks) when it doesn't.
+    try {
+      const gitOut = execFileSync('where', ['git'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      })
+      logger.info('agentHub:pty', 'git resolvable from PTY env', {
+        sessionId,
+        git: gitOut.split(/\r?\n/)[0]?.trim() || '(where returned nothing)'
+      })
+    } catch {
+      logger.warn('agentHub:pty', 'git NOT resolvable from PTY env — repo-dependent agent features (whitelists, repo detection) will fail', { sessionId })
+    }
 
     const session: PtySession = { pty: proc, sessionId }
     sessions.set(sessionId, session)
