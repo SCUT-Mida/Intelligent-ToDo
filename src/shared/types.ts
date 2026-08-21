@@ -99,6 +99,18 @@ export interface SavedAiConfig {
   model: string
 }
 
+/**
+ * App-wide common tool paths (v1.25.5) — ONE place to pin binaries that
+ * multiple sub-apps need (RepoNav scanning, AgentHub PTY environment,
+ * task runs, diagnosis). Absolute paths take priority over PATH lookup.
+ */
+export interface ToolPaths {
+  /** Absolute git executable. Empty/undefined = resolve via PATH. */
+  git?: string
+  /** Absolute node executable. Empty/undefined = resolve via PATH. */
+  node?: string
+}
+
 /** Full persisted app data */
 export interface AppData {
   tasks: Task[]
@@ -113,6 +125,8 @@ export interface AppData {
   companyLastSaturday?: boolean
   /** Saved AI config profiles — users can store multiple and switch between them. */
   savedAiConfigs?: SavedAiConfig[]
+  /** App-wide common tool paths (git/node) shared across sub-apps (v1.25.5). */
+  toolPaths?: ToolPaths
 }
 
 /** A single AI-recommended priority item pointing to an existing task. */

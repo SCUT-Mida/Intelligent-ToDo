@@ -18,6 +18,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import type { RepoIndex, RepoEntry, RepoNavConfig } from '../../shared/repoNav'
 import { dataFilePath, migrateFromLegacy } from './paths'
+import { effectiveGitBinary } from '../toolPaths'
 import { logger } from '../logger'
 
 const execFileAsync = promisify(execFile)
@@ -190,7 +191,9 @@ async function enrichRepo(d: DiscoveredRepo, gitBinary: string, detectedAt: stri
  */
 export async function scanRepos(config: RepoNavConfig, onProgress?: ScanProgressCallback): Promise<RepoIndex> {
   const startTime = Date.now()
-  const gitBinary = config.gitBinary?.trim() || 'git'
+  // v1.25.5: empty RepoNav override falls back to the app-wide common tool
+  // path (设置 → 通用 → 工具路径) before defaulting to bare 'git'.
+  const gitBinary = effectiveGitBinary(config.gitBinary)
   logger.info('scanner', 'scan start', {
     scanRoots: config.scanRoots,
     scanDepth: config.scanDepth,

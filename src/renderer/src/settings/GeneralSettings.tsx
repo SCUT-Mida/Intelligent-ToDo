@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import type { AppConfig, SavedAiConfig } from '@shared/types'
+import type { AppConfig, SavedAiConfig, ToolPaths } from '@shared/types'
 import type { AiConfigScanResult, AiProviderConfig, AiProviderModel } from '@shared/aiConfig'
 import Section from '../components/Section'
 import { useAppContext } from '../store/AppContext'
@@ -488,6 +488,11 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
         <TokenUsageCard days={tokenUsage} />
       </Section>
 
+      {/* 通用工具路径（v1.25.5） */}
+      <Section title="工具路径" icon="🛠️" label="工具" defaultOpen={false}>
+        <CommonToolPathsSettings />
+      </Section>
+
       {/* Config add/edit modal */}
       {configModalOpen && (
         <div className="overlay" onMouseDown={() => setConfigModalOpen(false)}>
@@ -566,6 +571,112 @@ export default function GeneralSettings({ config, onSave }: GeneralSettingsProps
           )}
         </div>
       </Section>
+    </div>
+  )
+}
+
+// ── Common tool paths (v1.25.5) ─────────────────────────────────────────────
+
+interface ToolRowProps {
+  label: string
+  hint: string
+  placeholder: string
+  value: string
+  onChange: (v: string) => void
+}
+
+function ToolRow({ label, hint, placeholder, value, onChange }: ToolRowProps): JSX.Element {
+  const [probe, setProbe] = useState<{ stage: 'idle' } | { stage: 'busy' } | { stage: 'ok' } | { stage: 'fail'; msg: string }>({ stage: 'idle' })
+  const handleProbe = async (): Promise<void> => {
+    const v = value.trim()
+    if (!v) {
+      setProbe({ stage: 'idle' })
+      return
+    }
+    setProbe({ stage: 'busy' })
+    try {
+      const r = await window.repoNav.probeTool(v)
+      setProbe(r.ok ? { stage: 'ok' } : { stage: 'fail', msg: r.output?.slice(0, 120) ?? '不可用' })
+    } catch (e) {
+      setProbe({ stage: 'fail', msg: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  const handleBrowse = async (): Promise<void> => {
+    const picked = await window.repoNav.pickExecutable()
+    if (picked) onChange(picked)
+  }
+  return (
+    <div className="field">
+      <label className="field__label">{label}</label>
+      <div className="field__row">
+        <input
+          className="input"
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value)
+            setProbe({ stage: 'idle' })
+          }}
+          spellCheck={false}
+        />
+        <button type="button" className="btn btn--ghost" style={{ flexShrink: 0 }} onClick={() => void handleBrowse()}>
+          浏览
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          style={{ flexShrink: 0 }}
+          onClick={() => void handleProbe()}
+          disabled={!value.trim() || probe.stage === 'busy'}
+        >
+          {probe.stage === 'busy' ? '验证中…' : '验证'}
+        </button>
+      </div>
+      {probe.stage === 'ok' && <div className="field__hint field__hint--success">✓ 可正常执行</div>}
+      {probe.stage === 'fail' && <div className="field__hint field__hint--error">不可用：{probe.msg}</div>}
+      <div className="field__hint">{hint}</div>
+    </div>
+  )
+}
+
+/**
+ * App-wide git/node tool paths (v1.25.5) — one configuration shared by
+ * RepoNav scanning, the AgentHub PTY environment (agents' git/node
+ * subprocesses), task runs and diagnosis. Edits apply immediately via
+ * AppContext (no separate save button).
+ */
+function CommonToolPathsSettings(): JSX.Element {
+  const { state, dispatch } = useAppContext()
+  const toolPaths: ToolPaths = state.data.toolPaths ?? {}
+
+  const update = (patch: Partial<ToolPaths>): void => {
+    dispatch({
+      type: 'SET_DATA',
+      payload: { ...state.data, toolPaths: { ...toolPaths, ...patch } }
+    })
+  }
+
+  return (
+    <div>
+      <div className="field__hint" style={{ marginBottom: 12 }}>
+        配置一次，全局生效（仓库导航扫描、Agent 终端环境与其内部 git/node 调用、任务模式）。
+        留空则自动从系统 PATH 解析（含注册表重建）。建议在 Agent 内嵌工具报
+        「git/node 不是内部或外部命令」或安装位置自定义时填写。
+      </div>
+      <ToolRow
+        label="Git 可执行文件"
+        hint="例如 D:\Tool\Git\cmd\git.exe。仓库导航中单独配置的 git 优先级更高。"
+        placeholder="留空自动解析"
+        value={toolPaths.git ?? ''}
+        onChange={(v) => update({ git: v })}
+      />
+      <ToolRow
+        label="Node.js 可执行文件"
+        hint="例如 C:\Program Files\nodejs\node.exe。用于 Agent 的启动钩子 / MCP 服务等内部 node 调用。"
+        placeholder="留空自动解析"
+        value={toolPaths.node ?? ''}
+        onChange={(v) => update({ node: v })}
+      />
     </div>
   )
 }

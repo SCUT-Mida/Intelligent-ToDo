@@ -21,6 +21,9 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import type { EnvDiagnosisResult, EnvDiagnosisRow } from '../../shared/agentHub'
 import { buildSpawnTarget, buildPtyEnv } from './pty'
+import { rebuildRegistryPath, splitPathEntries, mergePathEntries } from './winEnv'
+import { getToolPaths } from '../toolPaths'
+import { existsSync as toolExists } from 'fs'
 import { logger } from '../logger'
 import { app } from 'electron'
 
@@ -132,6 +135,34 @@ export function diagnoseEnvironment(command: string, workDir: string): EnvDiagno
     value: gitInPath ? '是' : '否',
     ok: gitInPath
   })
+
+  // 6b. Registry PATH rebuild (v1.25.5): how many entries the effective PATH
+  // gains over the app's own (possibly sanitized) PATH.
+  const rebuilt = rebuildRegistryPath()
+  const ownCount = splitPathEntries(process.env.PATH ?? '').length
+  const effectiveCount = splitPathEntries(mergePathEntries(process.env.PATH ?? '', rebuilt)).length
+  rows.push({
+    label: '注册表 PATH 重建（机器+用户级）',
+    value: rebuilt
+      ? `注册表 ${splitPathEntries(rebuilt).length} 条；应用自带 ${ownCount} 条；合并后 ${effectiveCount} 条（新增 ${Math.max(0, effectiveCount - ownCount)}）`
+      : '注册表不可读（保持应用自带 PATH）',
+    ok: rebuilt ? null : false
+  })
+
+  // 6c. User-pinned common tool paths (设置 → 通用 → 工具路径).
+  const pinned = getToolPaths()
+  for (const [name, p] of [['git', pinned.git], ['node', pinned.node]] as const) {
+    if (!p) {
+      rows.push({ label: `通用工具路径 · ${name}`, value: '未配置（自动解析）', ok: null })
+    } else {
+      const usable = toolExists(p)
+      rows.push({
+        label: `通用工具路径 · ${name}`,
+        value: usable ? p : `${p}（文件不存在）`,
+        ok: usable
+      })
+    }
+  }
 
   // 7. cmd.exe AutoRun hooks — corporate env-injection points that our
   // direct-node spawn (bypassing cmd.exe) would skip.

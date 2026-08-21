@@ -16,6 +16,8 @@ import { existsSync, readFileSync } from 'fs'
 import { PTY_STREAM } from '../../shared/agentHub'
 import { logger } from '../logger'
 import { tokenizeArgs } from './args'
+import { effectivePath } from './winEnv'
+import { toolPathDirs } from '../toolPaths'
 
 // node-pty types from @lydell/node-pty
 type IPty = {
@@ -62,6 +64,23 @@ function safeSend(sender: WebContents, channel: string, ...args: unknown[]): voi
   }
 }
 
+/** Count non-empty PATH entries (helper for rebuild logging). */
+function splitPathEntryCount(pathValue: string): number {
+  return pathValue.split(';').filter((p) => p.trim().length > 0).length
+}
+
+/**
+ * Absolute where.exe path + an env whose PATH includes the registry rebuild —
+ * lets command resolution work even when the app's own PATH is sanitized
+ * (v1.25.5). Returns null when where.exe cannot be located at all.
+ */
+function whereTool(): { file: string; env: Record<string, string> } | null {
+  const root = process.env.SystemRoot ?? process.env.windir ?? 'C:\\Windows'
+  const file = join(root, 'System32', 'where.exe')
+  if (!existsSync(file)) return null
+  return { file, env: { ...process.env, PATH: effectivePath() } as Record<string, string> }
+}
+
 /**
  * Build the spawn target for a given agent command.
  *
@@ -96,33 +115,38 @@ export function buildSpawnTarget(command: string): { file: string; args: string[
     }
   }
 
-  // Strategy 1: where.exe PATH lookup (most reliable — searches actual PATH).
-  // This mirrors detect.ts's which() strategy and catches tools regardless
-  // of install location. Critical because the hardcoded bin dirs below may
-  // miss tools installed in non-standard locations.
+  // Strategy 1: where.exe PATH lookup (most reliable — searches the FULL
+  // rebuilt PATH, v1.25.5, so it works even when the app's own PATH is
+  // sanitized). This mirrors detect.ts's which() strategy and catches tools
+  // regardless of install location. Critical because the hardcoded bin dirs
+  // below may miss tools installed in non-standard locations.
   if (process.platform === 'win32') {
-    try {
-      const stdout = execFileSync('where', [command], {
-        encoding: 'utf-8',
-        timeout: 5000,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true
-      })
-      const paths = stdout.split(/\r?\n/).map((p) => p.trim()).filter(Boolean)
-      for (const p of paths) {
-        if (/\.cmd$/i.test(p)) {
-          const parsed = parseNpmCmdShim(p)
-          if (parsed) {
-            logger.info('agentHub:pty', `resolved via where.exe: ${command} → ${parsed.file}`)
-            return parsed
+    const where = whereTool()
+    if (where) {
+      try {
+        const stdout = execFileSync(where.file, [command], {
+          encoding: 'utf-8',
+          timeout: 5000,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          env: where.env
+        })
+        const paths = stdout.split(/\r?\n/).map((p) => p.trim()).filter(Boolean)
+        for (const p of paths) {
+          if (/\.cmd$/i.test(p)) {
+            const parsed = parseNpmCmdShim(p)
+            if (parsed) {
+              logger.info('agentHub:pty', `resolved via where.exe: ${command} → ${parsed.file}`)
+              return parsed
+            }
+          } else if (/\.exe$/i.test(p) && existsSync(p)) {
+            logger.info('agentHub:pty', `resolved via where.exe: ${command} → ${p}`)
+            return { file: p, args: [] }
           }
-        } else if (/\.exe$/i.test(p) && existsSync(p)) {
-          logger.info('agentHub:pty', `resolved via where.exe: ${command} → ${p}`)
-          return { file: p, args: [] }
         }
+      } catch {
+        // where.exe didn't find it — fall through to hardcoded bin dirs
       }
-    } catch {
-      // where.exe didn't find it — fall through to hardcoded bin dirs
     }
   }
 
@@ -178,22 +202,26 @@ export function buildSpawnTarget(command: string): { file: string; args: string[
  * Exported since v1.23 (see buildSpawnTarget).
  */
 export function resolveNodeExe(): string {
-  // Strategy 1: where.exe (searches PATH — works even in packaged Electron
-  // because where.exe itself is in System32 which is always on PATH)
+  // Strategy 1: where.exe (searches the full rebuilt PATH, v1.25.5 — works
+  // even in packaged Electron because where.exe itself is in System32)
   if (process.platform === 'win32') {
-    try {
-      const stdout = execFileSync('where', ['node'], {
-        encoding: 'utf-8',
-        timeout: 5000,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true
-      })
-      const path = stdout.split(/\r?\n/)[0]?.trim()
-      if (path && existsSync(path)) {
-        return path
+    const where = whereTool()
+    if (where) {
+      try {
+        const stdout = execFileSync(where.file, ['node'], {
+          encoding: 'utf-8',
+          timeout: 5000,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          env: where.env
+        })
+        const path = stdout.split(/\r?\n/)[0]?.trim()
+        if (path && existsSync(path)) {
+          return path
+        }
+      } catch {
+        // node not on PATH — fall through to common dirs
       }
-    } catch {
-      // node not on PATH — fall through to common dirs
     }
   }
 
@@ -331,6 +359,8 @@ export function buildPtyEnv(): Record<string, string> {
   // whitelist checks) even though the agent itself was resolved via
   // buildSpawnTarget.
   const extraDirs = [
+    // User-pinned common tool dirs (设置 → 通用 → 工具路径) take priority.
+    ...toolPathDirs(),
     ...nodeDirs,
     join(process.env.APPDATA ?? '', 'npm'),
     join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Python'),
@@ -344,19 +374,15 @@ export function buildPtyEnv(): Record<string, string> {
     join(process.env.USERPROFILE ?? '', 'scoop', 'shims')
   ].filter((d) => d && existsSync(d))
 
-  if (extraDirs.length > 0) {
-    const currentPath = env.PATH ?? ''
-    const currentLower = currentPath.toLowerCase().split(';').map((p) => p.trim().replace(/\\/g, '/'))
-    const missing = extraDirs.filter((d) => {
-      const normalized = d.toLowerCase().replace(/\\/g, '/')
-      return !currentLower.includes(normalized)
-    })
-    if (missing.length > 0) {
-      env.PATH = currentPath
-        ? currentPath + ';' + missing.join(';')
-        : missing.join(';')
-      logger.info('agentHub:pty', 'augmented PATH for PTY', { added: missing.length, dirs: missing })
-    }
+  // v1.25.5: the app's own PATH can be severely sanitized (observed without
+  // even System32 after an updater relaunch), and hardcoded dirs can't cover
+  // custom installs (e.g. Git at D:\Tool\Git). Rebuild the logon-equivalent
+  // PATH from the registry (machine + user) and merge everything.
+  const before = splitPathEntryCount(env.PATH ?? '')
+  env.PATH = effectivePath(extraDirs)
+  const added = splitPathEntryCount(env.PATH) - before
+  if (added > 0) {
+    logger.info('agentHub:pty', 'rebuilt PATH for PTY', { addedEntries: added })
   }
 
   // Terminal env vars for proper ANSI/color support in ConPTY.
@@ -411,20 +437,25 @@ export function createPty(
 
     // Diagnostic (v1.25.2): log whether `git` resolves from the PTY env —
     // agents that identify the repo by shelling out to git fail confusingly
-    // (e.g. server-side whitelist checks) when it doesn't.
-    try {
-      const gitOut = execFileSync('where', ['git'], {
-        encoding: 'utf-8',
-        timeout: 5000,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true
-      })
-      logger.info('agentHub:pty', 'git resolvable from PTY env', {
-        sessionId,
-        git: gitOut.split(/\r?\n/)[0]?.trim() || '(where returned nothing)'
-      })
-    } catch {
-      logger.warn('agentHub:pty', 'git NOT resolvable from PTY env — repo-dependent agent features (whitelists, repo detection) will fail', { sessionId })
+    // (e.g. server-side whitelist checks) when it doesn't. Uses the same
+    // rebuilt PATH the PTY gets (v1.25.5).
+    const diagWhere = whereTool()
+    if (diagWhere) {
+      try {
+        const gitOut = execFileSync(diagWhere.file, ['git'], {
+          encoding: 'utf-8',
+          timeout: 5000,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          env: diagWhere.env
+        })
+        logger.info('agentHub:pty', 'git resolvable from PTY env', {
+          sessionId,
+          git: gitOut.split(/\r?\n/)[0]?.trim() || '(where returned nothing)'
+        })
+      } catch {
+        logger.warn('agentHub:pty', 'git NOT resolvable from PTY env — repo-dependent agent features (whitelists, repo detection) will fail', { sessionId })
+      }
     }
 
     const session: PtySession = { pty: proc, sessionId }

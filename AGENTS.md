@@ -62,7 +62,8 @@ npm run build:win  # 构建安装包
 
 ## 已知坑（改动前必读）
 
-- 打包后 PATH 被净化：一切外部命令解析必须走 `agentHub/pty.ts` 的 `buildSpawnTarget` / `repoNav/which.ts`（where.exe + 已知 bin 目录兜底），不要假设 PATH 可用
+- 打包后 PATH 被净化（极端时连 System32 都没有，常见于 electron-updater 重启后）：一切外部命令解析必须走 `agentHub/pty.ts` 的 `buildSpawnTarget`（where.exe 用绝对路径 + 重建 PATH）；子进程环境一律用 `buildPtyEnv()`（内部经 `winEnv.ts` 从注册表重建机器+用户级 PATH，并叠加 `toolPaths.ts` 的通用工具路径与常用安装目录）。不要假设 process.env.PATH 可用
+- 通用工具路径（git/node）集中在 `src/main/toolPaths.ts`（持久化在 todo-data.json 的 `toolPaths` 字段，UI 在 通用设置→工具路径）；RepoNav 自身的 gitBinary 优先，留空回落到通用配置
 - node-pty 在 Windows 需要绝对 node.exe 路径（CreateProcess 不搜 PATH）
 - `Menu.setApplicationMenu(null)` 不能恢复：默认菜单的 Ctrl+V 会破坏 xterm 粘贴（见 `src/main/index.ts` 注释）
 - 隐藏面板时 xterm fit 会得到 0 尺寸并使 TUI agent 崩溃（exit code 3），ResizeObserver 已过滤
