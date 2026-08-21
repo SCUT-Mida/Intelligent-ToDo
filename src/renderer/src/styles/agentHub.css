@@ -2134,3 +2134,74 @@
   margin-right: auto;
   font-size: 12px;
 }
+
+/* ── Session environment diagnosis dialog (v1.25.3) ─────────────────────── */
+
+.env-diagnose {
+  width: 560px;
+  max-width: 92vw;
+}
+
+.env-diagnose__meta {
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.env-diagnose__loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 20px 0;
+  justify-content: center;
+}
+
+.env-diagnose__error {
+  color: var(--danger);
+  font-size: 13px;
+  background: var(--danger-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}
+
+.env-diagnose__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.env-diagnose__row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.env-diagnose__row:nth-child(odd) {
+  background: var(--bg);
+}
+
+.env-diagnose__mark {
+  flex-shrink: 0;
+  width: 18px;
+}
+
+.env-diagnose__label {
+  flex-shrink: 0;
+  width: 230px;
+  color: var(--text-muted);
+}
+
+.env-diagnose__value {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}

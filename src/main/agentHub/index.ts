@@ -22,7 +22,8 @@ import type {
   TaskRunStartResult,
   TaskRunInfo,
   TaskEvent,
-  SessionSearchHit
+  SessionSearchHit,
+  EnvDiagnosisResult
 } from '../../shared/agentHub'
 import { detectAgents } from './detect'
 import { loadSessions, saveSessions } from './persistence'
@@ -30,6 +31,7 @@ import { getAgentConfig, saveAgentConfig } from './agentConfig'
 import { createPty, sendInput, resizePty, killPty, killAllPtys } from './pty'
 import { runTask, cancelTask, listTasks, getSessionEvents, cancelAllTasks } from './taskRunner'
 import { searchSessions } from './search'
+import { diagnoseEnvironment } from './diagnose'
 import { openRepoInTerminal } from '../repoNav/launcher'
 import { getConfig as getRepoNavConfig } from '../repoNav/config'
 import { logger } from '../logger'
@@ -162,8 +164,17 @@ export function registerAgentHubIpc(ipc: typeof ipcMain): void {
     clipboard.writeText(typeof text === 'string' ? text : '')
   })
 
-  // ── Structured task runs (v1.23) ─────────────────────────────────────────
-  // RUN: spawn a one-shot agent run (non-PTY), parse output into TaskEvents,
+  // DIAGNOSE_ENV (v1.25.3): probe the session environment (git resolution,
+  // repo root/remote, PATH augmentation, cmd AutoRun) through the SAME env
+  // the PTY uses — for debugging agent-side repo/whitelist failures.
+  ipc.handle(
+    AGENT_IPC.DIAGNOSE_ENV,
+    (_e, command: string, workDir: string): EnvDiagnosisResult => {
+      return diagnoseEnvironment(command ?? '', workDir ?? '')
+    }
+  )
+
+  // ── Structured task runs (v1.23) ─────────────────────────────────────────  // RUN: spawn a one-shot agent run (non-PTY), parse output into TaskEvents,
   // append them to the session's JSONL log and push live to the renderer.
   ipc.handle(TASK_IPC.RUN, (e, req: TaskRunRequest): TaskRunStartResult => {
     return runTask(e.sender, req)

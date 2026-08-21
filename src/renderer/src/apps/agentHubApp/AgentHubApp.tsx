@@ -5,6 +5,7 @@ import NewSessionDialog from '../../components/AgentHub/NewSessionDialog'
 import SessionHistoryDialog from '../../components/AgentHub/SessionHistoryDialog'
 import TaskRunDialog from '../../components/AgentHub/TaskRunDialog'
 import TaskTimeline from '../../components/AgentHub/TaskTimeline'
+import EnvDiagnoseDialog from '../../components/AgentHub/EnvDiagnoseDialog'
 import MarkdownEditor from '../../components/AgentHub/MarkdownEditor'
 import type { MarkdownHandle } from '../../components/AgentHub/MarkdownEditor'
 import TerminalView from '../../components/AgentHub/TerminalView'
@@ -86,6 +87,8 @@ export default function AgentHubApp(): JSX.Element {
   const [taskRuns, setTaskRuns] = useState<TaskRunInfo[]>([])
   // Session whose task-run dialog is open (null = closed).
   const [taskDialogSessionId, setTaskDialogSessionId] = useState<string | null>(null)
+  // Session whose environment diagnosis dialog is open (v1.25.3).
+  const [diagnoseSessionId, setDiagnoseSessionId] = useState<string | null>(null)
   // Pre-filled prompt for the next opened task dialog (cross-app hand-off).
   const [taskDialogPrefill, setTaskDialogPrefill] = useState<string | undefined>(undefined)
   // Per-session right-pane tab: interactive terminal vs structured timeline.
@@ -766,6 +769,13 @@ export default function AgentHubApp(): JSX.Element {
                             >
                               ▶ 运行任务
                             </button>
+                            <button
+                              className="btn btn--ghost agent-hub__panel-run"
+                              onClick={() => setDiagnoseSessionId(s.id)}
+                              title="诊断会话环境：git 解析 / 仓库识别 / PATH / cmd AutoRun（排查白名单类问题）"
+                            >
+                              🔍 诊断
+                            </button>
                           </div>
                           {/* TerminalView stays MOUNTED across tab switches so
                               the live PTY session survives (same reason panels
@@ -860,6 +870,20 @@ export default function AgentHubApp(): JSX.Element {
             onRun={(prompt, background) => {
               void handleRunTask(session.id, prompt, background)
             }}
+          />
+        )
+      })()}
+
+      {/* Session environment diagnosis (v1.25.3) */}
+      {diagnoseSessionId && (() => {
+        const session = sessions.find((s) => s.id === diagnoseSessionId)
+        if (!session) return null
+        const agent = agents.find((a) => a.id === session.agentId)
+        return (
+          <EnvDiagnoseDialog
+            command={agent?.command ?? session.agentId}
+            workDir={session.workDir}
+            onClose={() => setDiagnoseSessionId(null)}
           />
         )
       })()}

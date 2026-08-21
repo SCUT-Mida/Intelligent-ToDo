@@ -53,7 +53,13 @@ export const AGENT_IPC = {
    /** Read clipboard text from the main process (reliable paste into PTY). */
    CLIPBOARD_READ: 'agentHub:clipboardRead',
    /** Write text to the OS clipboard from the main process (reliable copy). */
-   CLIPBOARD_WRITE: 'agentHub:clipboardWrite'
+   CLIPBOARD_WRITE: 'agentHub:clipboardWrite',
+  /**
+   * Session environment diagnosis (v1.25.3): probes git resolution, repo
+   * detection, PATH augmentation and cmd AutoRun through the SAME env the
+   * PTY would use — for debugging agent-side repo/whitelist failures.
+   */
+  DIAGNOSE_ENV: 'agentHub:diagnoseEnv'
  } as const
 
  // ── PTY push event channels (main → renderer) ──────────────────────────────
@@ -168,6 +174,21 @@ export interface TaskRunStartResult {
   ok: boolean
   runId?: string
   error?: string
+}
+
+/** One row of a session environment diagnosis (v1.25.3). */
+export interface EnvDiagnosisRow {
+  label: string
+  value: string
+  /** null = informational; true/false = check-style pass/fail. */
+  ok: boolean | null
+}
+
+/** Full diagnosis report for a (command, workDir) session environment. */
+export interface EnvDiagnosisResult {
+  at: string
+  appVersion: string
+  rows: EnvDiagnosisRow[]
 }
 
 /** Search hit for TASK_IPC.SEARCH. */

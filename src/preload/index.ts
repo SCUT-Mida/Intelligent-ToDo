@@ -16,7 +16,8 @@ import type {
   TaskRunStartResult,
   TaskRunInfo,
   TaskEvent,
-  SessionSearchHit
+  SessionSearchHit,
+  EnvDiagnosisResult
 } from '../shared/agentHub'
 import { API_TOOL_IPC } from '../shared/apiTool'
 import type { ApiRequestSpec, ApiResponseResult, ApiToolData, ApiToolSettings } from '../shared/apiTool'
@@ -215,6 +216,13 @@ const agentHub = {
   readClipboard: (): Promise<string> => ipcRenderer.invoke(AGENT_IPC.CLIPBOARD_READ),
   /** Write text to the OS clipboard via the main process (always reliable). */
   writeClipboard: (text: string): Promise<void> => ipcRenderer.invoke(AGENT_IPC.CLIPBOARD_WRITE, text),
+  /**
+   * Probe the session environment (v1.25.3): git resolution, repo root and
+   * remote, PATH augmentation, cmd AutoRun — using the SAME env a PTY would
+   * get. For debugging agent-side repo/whitelist failures.
+   */
+  diagnoseEnv: (command: string, workDir: string): Promise<EnvDiagnosisResult> =>
+    ipcRenderer.invoke(AGENT_IPC.DIAGNOSE_ENV, command, workDir),
 
   // ── PTY event subscriptions (each returns an unsubscribe function) ──
   /** Subscribe to PTY output data. */
