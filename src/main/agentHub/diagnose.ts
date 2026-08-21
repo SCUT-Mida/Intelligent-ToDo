@@ -91,6 +91,17 @@ export function diagnoseEnvironment(command: string, workDir: string): EnvDiagno
     ok: whereGit.ok
   })
 
+  // 3b. node resolution (v1.25.4) — agent-side hooks/MCP shell out to `node`;
+  // a failure here reproduces "SessionStart hook error: node: command not found".
+  const whereNode = run('where', ['node'], env)
+  rows.push({
+    label: 'node 可解析（PTY 环境 PATH）',
+    value: whereNode.ok
+      ? whereNode.out.split(/\r?\n/)[0]?.trim() ?? ''
+      : `不可解析：${whereNode.out || 'where 找不到 node（钩子/MCP 将失败）'}`,
+    ok: whereNode.ok
+  })
+
   if (gitPath) {
     const version = run(gitPath, ['--version'], env)
     rows.push({ label: 'git 版本', value: version.out || '(无输出)', ok: version.ok })

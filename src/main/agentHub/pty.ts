@@ -11,7 +11,7 @@
 
 import type { WebContents } from 'electron'
 import { execFileSync } from 'child_process'
-import { join, dirname } from 'path'
+import { join, dirname, isAbsolute } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { PTY_STREAM } from '../../shared/agentHub'
 import { logger } from '../logger'
@@ -309,6 +309,20 @@ function parseNpmCmdShim(cmdPath: string): { file: string; args: string[] } | nu
 export function buildPtyEnv(): Record<string, string> {
   const env = { ...process.env } as Record<string, string>
 
+  // The node.exe that would actually run this session's agent — putting its
+  // directory on PATH makes `node` resolvable for AGENT-SIDE child processes
+  // (Claude-Code-style SessionStart hooks, MCP servers spawn via bash).
+  // v1.25.4: without this, agents run fine (spawned via absolute node path)
+  // while their hooks/MCP fail with "node: command not found" in the
+  // sanitized PATH of the packaged app.
+  const resolvedNode = resolveNodeExe()
+  const nodeDirs = [
+    isAbsolute(resolvedNode) && resolvedNode !== 'node' ? dirname(resolvedNode) : '',
+    join(process.env.ProgramFiles ?? '', 'nodejs'),
+    join(process.env['ProgramFiles(x86)'] ?? '', 'nodejs'),
+    join(process.env.LOCALAPPDATA ?? '', 'Programs', 'nodejs')
+  ].filter((d) => d && existsSync(d))
+
   // Common Windows user-level bin directories — same set as buildSpawnTarget
   // and detect.ts, kept in sync.
   // Git dirs are included since v1.25.2: packaged Electron's sanitized PATH
@@ -317,6 +331,7 @@ export function buildPtyEnv(): Record<string, string> {
   // whitelist checks) even though the agent itself was resolved via
   // buildSpawnTarget.
   const extraDirs = [
+    ...nodeDirs,
     join(process.env.APPDATA ?? '', 'npm'),
     join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Python'),
     join(process.env.USERPROFILE ?? '', '.cargo', 'bin'),
