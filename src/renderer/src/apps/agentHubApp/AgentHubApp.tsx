@@ -466,6 +466,22 @@ export default function AgentHubApp(): JSX.Element {
     setHistorySessionId(null)
   }, [])
 
+  // Toggle an entry's pin in the owning repo's history (v1.26). History is
+  // keyed by workDir, so the flag survives session deletion like the rest.
+  const handleTogglePinHistory = useCallback((sessionId: string, entryId: string): void => {
+    const session = sessionsRef.current.find((s) => s.id === sessionId)
+    const key = session?.workDir || sessionId
+    setHistories((prev) => {
+      const entries = prev[key]
+      if (!entries) return prev
+      return {
+        ...prev,
+        [key]: entries.map((e) => (e.id === entryId ? { ...e, pinned: !e.pinned } : e))
+      }
+    })
+    pendingSaveRef.current++
+  }, [])
+
   const handleRenameSession = useCallback((id: string, title: string): void => {
     setSessions((prev) =>
       prev.map((s) =>
@@ -852,6 +868,7 @@ export default function AgentHubApp(): JSX.Element {
           entries={histories[historySession.workDir] ?? []}
           onClose={handleCloseHistory}
           onReEdit={(entry) => handleReEdit(historySession.id, entry.content)}
+          onTogglePin={(entry) => handleTogglePinHistory(historySession.id, entry.id)}
         />
       )}
 

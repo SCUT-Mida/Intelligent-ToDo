@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentSession, SessionHistoryEntry } from '@shared/agentHub'
+import { sortHistoryEntries } from '@shared/agentHub'
 
 interface HistoryEntryProps {
   entry: SessionHistoryEntry
   onReEdit: (entry: SessionHistoryEntry) => void
+  onTogglePin: (entry: SessionHistoryEntry) => void
 }
 
 /**
@@ -15,7 +17,7 @@ interface HistoryEntryProps {
  * reading scrollHeight directly on a clamped element returns the clamped
  * height, so that naive check would never detect overflow.
  */
-function HistoryEntry({ entry, onReEdit }: HistoryEntryProps): JSX.Element {
+function HistoryEntry({ entry, onReEdit, onTogglePin }: HistoryEntryProps): JSX.Element {
   const preRef = useRef<HTMLPreElement>(null)
   const [expanded, setExpanded] = useState(false)
   const [overflowing, setOverflowing] = useState(false)
@@ -57,7 +59,11 @@ function HistoryEntry({ entry, onReEdit }: HistoryEntryProps): JSX.Element {
   const collapsed = !expanded && overflowing
 
   return (
-    <div className="session-history-dialog__entry">
+    <div
+      className={`session-history-dialog__entry${
+        entry.pinned ? ' session-history-dialog__entry--pinned' : ''
+      }`}
+    >
       <div className="session-history-dialog__entry-meta">
         <span className="session-history-dialog__time">
           {new Date(entry.at).toLocaleString('zh-CN', { hour12: false })}
@@ -67,6 +73,11 @@ function HistoryEntry({ entry, onReEdit }: HistoryEntryProps): JSX.Element {
         >
           {entry.source === 'markdown' ? 'Markdown 发送' : '终端粘贴'}
         </span>
+        {entry.pinned && (
+          <span className="session-history-dialog__badge session-history-dialog__badge--pin">
+            📌 置顶
+          </span>
+        )}
       </div>
       <pre
         ref={preRef}
@@ -88,6 +99,14 @@ function HistoryEntry({ entry, onReEdit }: HistoryEntryProps): JSX.Element {
         )}
         <button
           type="button"
+          className="session-history-dialog__pin-btn"
+          onClick={() => onTogglePin(entry)}
+          title={entry.pinned ? '取消置顶' : '置顶：常用提问固定在历史最上方'}
+        >
+          {entry.pinned ? '📌 取消置顶' : '📌 置顶'}
+        </button>
+        <button
+          type="button"
           className="session-history-dialog__reedit-btn"
           onClick={() => onReEdit(entry)}
           title="把这条内容载入 Markdown 编辑器"
@@ -102,26 +121,30 @@ function HistoryEntry({ entry, onReEdit }: HistoryEntryProps): JSX.Element {
 interface SessionHistoryDialogProps {
   /** Session whose history is shown (null while closing). */
   session: AgentSession | null
-  /** This session's history entries (newest last). */
+  /** This session's history entries (newest last, pinned-agnostic). */
   entries: SessionHistoryEntry[]
   onClose: () => void
   /** Load an entry back into that session's markdown editor for editing. */
   onReEdit: (entry: SessionHistoryEntry) => void
+  /** Toggle an entry's pinned flag (pinned entries float to the top, v1.26). */
+  onTogglePin: (entry: SessionHistoryEntry) => void
 }
 
 /**
  * Modal dialog listing a session's pasted/sent question history.
  *
- * Renders newest-first cards (timestamp + source badge + content + a single
- * "重新编辑" action that loads the entry back into the markdown editor).
- * Esc closes the dialog; clicking the overlay (not the box) also closes it.
- * Follows the `.new-session-dialog` overlay pattern with a light theme.
+ * Renders pinned entries first (then newest-first): timestamp + source
+ * badge + content + per-entry actions — 置顶/取消置顶 and 重新编辑 (loads
+ * the entry back into the markdown editor). Esc closes the dialog; clicking
+ * the overlay (not the box) also closes it. Follows the `.new-session-dialog`
+ * overlay pattern with a light theme.
  */
 export default function SessionHistoryDialog({
   session,
   entries,
   onClose,
-  onReEdit
+  onReEdit,
+  onTogglePin
 }: SessionHistoryDialogProps): JSX.Element | null {
   // Close on Escape
   useEffect(() => {
@@ -138,8 +161,8 @@ export default function SessionHistoryDialog({
     return null
   }
 
-  // Newest first — render in reverse without mutating the original array
-  const newestFirst = [...entries].reverse()
+  // Pinned first, then newest-first; non-mutating (v1.26).
+  const ordered = sortHistoryEntries(entries)
 
   return (
     <div
@@ -165,8 +188,13 @@ export default function SessionHistoryDialog({
           </div>
         ) : (
           <div className="session-history-dialog__list">
-            {newestFirst.map((entry) => (
-              <HistoryEntry key={entry.id} entry={entry} onReEdit={onReEdit} />
+            {ordered.map((entry) => (
+              <HistoryEntry
+                key={entry.id}
+                entry={entry}
+                onReEdit={onReEdit}
+                onTogglePin={onTogglePin}
+              />
             ))}
           </div>
         )}

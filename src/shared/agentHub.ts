@@ -316,6 +316,20 @@ export interface SessionHistoryEntry {
   content: string
   /** Source: markdown editor send button or manual terminal paste */
   source: 'markdown' | 'paste'
+  /** Pinned entries sort to the top of the history dialog (v1.26). */
+  pinned?: boolean
+}
+
+/**
+ * Display order for history entries: pinned first, then by recency —
+ * newest first within each group. Non-mutating. Pure — unit tested.
+ */
+export function sortHistoryEntries(entries: SessionHistoryEntry[]): SessionHistoryEntry[] {
+  const byTimeDesc = (a: SessionHistoryEntry, b: SessionHistoryEntry): number =>
+    b.at.localeCompare(a.at)
+  const pinned = entries.filter((e) => e.pinned === true).sort(byTimeDesc)
+  const rest = entries.filter((e) => e.pinned !== true).sort(byTimeDesc)
+  return [...pinned, ...rest]
 }
 
 export interface AgentHubData {

@@ -2205,3 +2205,36 @@
   font-size: 11px;
   word-break: break-all;
 }
+
+/* ── History dialog pin (v1.26) ──────────────────────────────────────────── */
+
+.session-history-dialog__entry--pinned {
+  border-left: 3px solid var(--primary);
+  background: var(--primary-soft);
+}
+
+.session-history-dialog__badge--pin {
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.session-history-dialog__pin-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.session-history-dialog__pin-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.session-history-dialog__entry--pinned .session-history-dialog__pin-btn {
+  border-color: var(--primary);
+  color: var(--primary);
+}
