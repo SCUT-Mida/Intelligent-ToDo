@@ -10,6 +10,7 @@ interface HistoryEntryProps {
   highlighted: boolean
   onReEdit: (entry: SessionHistoryEntry) => void
   onTogglePin: (entry: SessionHistoryEntry) => void
+  onDelete: (entry: SessionHistoryEntry) => void
 }
 
 /**
@@ -21,7 +22,7 @@ interface HistoryEntryProps {
  * reading scrollHeight directly on a clamped element returns the clamped
  * height, so that naive check would never detect overflow.
  */
-function HistoryEntry({ entry, highlighted, onReEdit, onTogglePin }: HistoryEntryProps): JSX.Element {
+function HistoryEntry({ entry, highlighted, onReEdit, onTogglePin, onDelete }: HistoryEntryProps): JSX.Element {
   const preRef = useRef<HTMLPreElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(false)
@@ -128,6 +129,18 @@ function HistoryEntry({ entry, highlighted, onReEdit, onTogglePin }: HistoryEntr
         >
           ✏️ 重新编辑
         </button>
+        <button
+          type="button"
+          className="session-history-dialog__delete-btn"
+          onClick={() => {
+            if (window.confirm('确定删除这条提问记录吗？删除后无法恢复。')) {
+              onDelete(entry)
+            }
+          }}
+          title="从历史中删除这条记录"
+        >
+          🗑 删除
+        </button>
       </div>
     </div>
   )
@@ -145,6 +158,8 @@ interface SessionHistoryDialogProps {
   onReEdit: (entry: SessionHistoryEntry) => void
   /** Toggle an entry's pinned flag (pinned entries float to the top). */
   onTogglePin: (entry: SessionHistoryEntry) => void
+  /** Delete one entry from the history (v1.26.2, confirmed by the entry card). */
+  onDelete: (entry: SessionHistoryEntry) => void
 }
 
 /**
@@ -161,7 +176,8 @@ export default function SessionHistoryDialog({
   focusEntryId,
   onClose,
   onReEdit,
-  onTogglePin
+  onTogglePin,
+  onDelete
 }: SessionHistoryDialogProps): JSX.Element | null {
   const [query, setQuery] = useState('')
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
@@ -276,6 +292,7 @@ export default function SessionHistoryDialog({
                 highlighted={focusEntryId === entry.id}
                 onReEdit={onReEdit}
                 onTogglePin={onTogglePin}
+                onDelete={onDelete}
               />
             ))}
             {hasMore && (

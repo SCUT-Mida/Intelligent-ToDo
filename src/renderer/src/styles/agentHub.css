@@ -2301,3 +2301,21 @@
     background: var(--bg);
   }
 }
+
+/* ── History entry delete (v1.26.2) ──────────────────────────────────────── */
+
+.session-history-dialog__delete-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.session-history-dialog__delete-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
+}

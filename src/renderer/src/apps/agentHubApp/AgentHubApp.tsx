@@ -488,6 +488,26 @@ export default function AgentHubApp(): JSX.Element {
     pendingSaveRef.current++
   }, [])
 
+  // Delete one history entry from the owning repo's history (v1.26.2).
+  // Closes the dialog if the deleted entry was the last one in view —
+  // actually only resets focus state; the dialog stays open on the rest.
+  const handleDeleteHistory = useCallback((sessionId: string, entryId: string): void => {
+    const session = sessionsRef.current.find((s) => s.id === sessionId)
+    const key = session?.workDir || sessionId
+    setHistories((prev) => {
+      const entries = prev[key]
+      if (!entries) return prev
+      return {
+        ...prev,
+        [key]: entries.filter((e) => e.id !== entryId)
+      }
+    })
+    if (historyFocusEntryId === entryId) {
+      setHistoryFocusEntryId(null)
+    }
+    pendingSaveRef.current++
+  }, [historyFocusEntryId])
+
   const handleRenameSession = useCallback((id: string, title: string): void => {
     setSessions((prev) =>
       prev.map((s) =>
@@ -887,6 +907,7 @@ export default function AgentHubApp(): JSX.Element {
           onClose={handleCloseHistory}
           onReEdit={(entry) => handleReEdit(historySession.id, entry.content)}
           onTogglePin={(entry) => handleTogglePinHistory(historySession.id, entry.id)}
+          onDelete={(entry) => handleDeleteHistory(historySession.id, entry.id)}
         />
       )}
 
