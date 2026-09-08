@@ -11,7 +11,7 @@ import type { MarkdownHandle } from '../../components/AgentHub/MarkdownEditor'
 import TerminalView from '../../components/AgentHub/TerminalView'
 import type { TerminalHandle } from '../../components/AgentHub/TerminalView'
 import type { AgentSession, AgentDescriptor, AgentDefinition, AgentHubData, AgentHubConfig, SessionHistoryEntry, TaskEvent, TaskRunInfo, SessionSearchHit } from '@shared/agentHub'
-import { createDefaultAgentHubData, buildHandoffPrompt } from '@shared/agentHub'
+import { createDefaultAgentHubData, buildHandoffPrompt, HISTORY_LIMIT } from '@shared/agentHub'
 import '../../styles/agentHub.css'
 
 interface RepoEntry {
@@ -79,6 +79,8 @@ export default function AgentHubApp(): JSX.Element {
   const [histories, setHistories] = useState<Record<string, SessionHistoryEntry[]>>({})
   // Session whose history dialog is currently open (null = closed)
   const [historySessionId, setHistorySessionId] = useState<string | null>(null)
+  // History entry to scroll-to/highlight when the dialog opens (v1.26.1).
+  const [historyFocusEntryId, setHistoryFocusEntryId] = useState<string | null>(null)
 
   // ── Structured tasks (v1.23) ──────────────────────────────────────────
   // Per-session structured event log (loaded from main; appended live).
@@ -96,6 +98,9 @@ export default function AgentHubApp(): JSX.Element {
   // Cross-session search.
   const [searchResults, setSearchResults] = useState<SessionSearchHit[] | null>(null)
   const [searching, setSearching] = useState(false)
+  // "Clear sidebar search" callback registered by SessionSidebar (v1.26.1) —
+  // invoked when a hit is clicked so the sidebar returns to the session list.
+  const [clearSidebarSearch, setClearSidebarSearch] = useState<(() => void) | null>(null)
   // Ephemeral flash banner (task write-back confirmations etc.).
   const [flash, setFlash] = useState<string | null>(null)
 
@@ -404,7 +409,7 @@ export default function AgentHubApp(): JSX.Element {
       }
       setHistories((prev) => ({
         ...prev,
-        [key]: [...(prev[key] ?? []), entry].slice(-100)
+        [key]: [...(prev[key] ?? []), entry].slice(-HISTORY_LIMIT)
       }))
       // Flag for persistence — without this the new entry would never be
       // written to disk (the persist effect only saves when flagged).
@@ -457,6 +462,7 @@ export default function AgentHubApp(): JSX.Element {
 
   const handleCloseHistory = useCallback((): void => {
     setHistorySessionId(null)
+    setHistoryFocusEntryId(null)
   }, [])
 
   // Load a history entry back into that session's markdown editor for editing,
@@ -598,8 +604,18 @@ export default function AgentHubApp(): JSX.Element {
       if (hit.source !== 'prompt') {
         setSessionTabs((prev) => ({ ...prev, [hit.sessionId as string]: 'tasks' }))
       }
+      // v1.26.1: leave search mode so the selection is VISIBLE in the
+      // sidebar (previously the sidebar kept rendering the hit list, so
+      // clicking a second result appeared to "do nothing").
+      clearSidebarSearch?.()
     }
-  }, [])
+    // History-prompt hits: open that repo's history dialog focused on the
+    // matched entry (v1.26.1).
+    if (hit.source === 'prompt' && hit.entryId && hit.sessionId) {
+      setHistorySessionId(hit.sessionId)
+      setHistoryFocusEntryId(hit.entryId)
+    }
+  }, [clearSidebarSearch])
 
   const handleAddCustomAgent = useCallback(async (command: string): Promise<boolean> => {
     const trimmed = command.trim()
@@ -680,6 +696,7 @@ export default function AgentHubApp(): JSX.Element {
         searchResults={searchResults}
         searching={searching}
         onSelectResult={handleSelectSearchResult}
+        onRegisterClearSearch={setClearSidebarSearch}
       />
 
       <div className="agent-hub__main">
@@ -866,6 +883,7 @@ export default function AgentHubApp(): JSX.Element {
         <SessionHistoryDialog
           session={historySession}
           entries={histories[historySession.workDir] ?? []}
+          focusEntryId={historyFocusEntryId}
           onClose={handleCloseHistory}
           onReEdit={(entry) => handleReEdit(historySession.id, entry.content)}
           onTogglePin={(entry) => handleTogglePinHistory(historySession.id, entry.id)}

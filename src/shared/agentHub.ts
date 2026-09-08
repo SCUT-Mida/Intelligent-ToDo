@@ -203,6 +203,11 @@ export interface SessionSearchHit {
   source: 'prompt' | 'assistant' | 'tool'
   /** Snippet with the match roughly centered (already truncated). */
   snippet: string
+  /**
+   * The exact history entry id when the hit came from a question history
+   * (v1.26.1) — lets the renderer open that repo's history and highlight it.
+   */
+  entryId?: string
 }
 
 /**
@@ -319,6 +324,12 @@ export interface SessionHistoryEntry {
   /** Pinned entries sort to the top of the history dialog (v1.26). */
   pinned?: boolean
 }
+
+/**
+ * Cap per-repo question history (v1.26.1: 100 → 500; dialog pages 30 at a
+ * time). Existing stores are trimmed on next save.
+ */
+export const HISTORY_LIMIT = 500
 
 /**
  * Display order for history entries: pinned first, then by recency —

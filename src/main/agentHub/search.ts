@@ -56,10 +56,21 @@ export function searchSessions(query: string, data: AgentHubData): SessionSearch
   if (q.length < 2) return []
   const hits: SessionSearchHit[] = []
 
-  // workDir → session ids (titles resolve in the renderer).
+  // workDir → session ids (most recently active first), so a history hit can
+  // route to a CONCRETE session (v1.26.1: previously always the first one,
+  // which made every hit of a multi-session repo land on the same session).
   const byWorkDir = new Map<string, string[]>()
   for (const s of data.sessions) {
     byWorkDir.set(s.workDir, [...(byWorkDir.get(s.workDir) ?? []), s.id])
+  }
+  for (const [workDir, ids] of byWorkDir) {
+    ids.sort((a, b) => {
+      const sa = data.sessions.find((x) => x.id === a)
+      const sb = data.sessions.find((x) => x.id === b)
+      const ta = sa?.lastLaunchedAt ?? sa?.createdAt ?? ''
+      const tb = sb?.lastLaunchedAt ?? sb?.createdAt ?? ''
+      return tb.localeCompare(ta)
+    })
   }
 
   // 1. Question histories.
@@ -71,6 +82,7 @@ export function searchSessions(query: string, data: AgentHubData): SessionSearch
         workDir,
         at: entry.at,
         source: 'prompt',
+        entryId: entry.id,
         snippet: buildSnippet(entry.content, query.trim())
       })
       if (hits.length >= MAX_HITS) return hits

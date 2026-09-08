@@ -29,6 +29,12 @@ interface SessionSidebarProps {
   searching: boolean
   /** Called when a search hit is clicked. */
   onSelectResult: (hit: SessionSearchHit) => void
+  /**
+   * Register a callback that clears the search box (v1.26.1) — the parent
+   * calls it when a hit is selected so the sidebar returns to the grouped
+   * session list and the newly-selected session becomes visible.
+   */
+  onRegisterClearSearch: (clear: () => void) => void
 }
 
 /**
@@ -84,7 +90,8 @@ export default function SessionSidebar({
   onSearch,
   searchResults,
   searching,
-  onSelectResult
+  onSelectResult,
+  onRegisterClearSearch
 }: SessionSidebarProps): JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -105,6 +112,13 @@ export default function SessionSidebar({
   }, [searchText])
 
   const isSearching = searchText.trim().length >= 2
+
+  // Expose "clear search" to the parent (v1.26.1): called when a hit is
+  // clicked so the sidebar flips back to the session list immediately.
+  useEffect(() => {
+    onRegisterClearSearch(() => setSearchText(''))
+    return () => onRegisterClearSearch(() => {})
+  }, [onRegisterClearSearch])
 
   // WorkDir groups collapsed by the user (keyed by the group key).
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())

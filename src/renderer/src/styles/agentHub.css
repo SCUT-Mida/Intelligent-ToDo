@@ -2238,3 +2238,66 @@
   border-color: var(--primary);
   color: var(--primary);
 }
+
+/* ── History dialog search + paging + focus (v1.26.1) ─────────────────── */
+
+.session-history-dialog__search {
+  position: relative;
+  padding: 0 18px 10px;
+  flex-shrink: 0;
+}
+
+.session-history-dialog__search-input {
+  width: 100%;
+  font-size: 13px;
+  padding: 6px 30px 6px 12px;
+}
+
+.session-history-dialog__search-clear {
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.session-history-dialog__search-clear:hover {
+  color: var(--text);
+}
+
+.session-history-dialog__load-more {
+  margin: 10px auto 4px;
+  display: block;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 6px 18px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.session-history-dialog__load-more:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.session-history-dialog__entry--focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  animation: history-focus-fade 2s ease forwards;
+}
+
+@keyframes history-focus-fade {
+  0%, 60% {
+    background: var(--primary-soft);
+  }
+  100% {
+    background: var(--bg);
+  }
+}

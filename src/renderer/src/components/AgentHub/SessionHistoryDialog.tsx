@@ -1,9 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentSession, SessionHistoryEntry } from '@shared/agentHub'
 import { sortHistoryEntries } from '@shared/agentHub'
 
+/** How many entries to render initially and per "load more" step (v1.26.1). */
+const PAGE_SIZE = 30
+
 interface HistoryEntryProps {
   entry: SessionHistoryEntry
+  highlighted: boolean
   onReEdit: (entry: SessionHistoryEntry) => void
   onTogglePin: (entry: SessionHistoryEntry) => void
 }
@@ -17,8 +21,9 @@ interface HistoryEntryProps {
  * reading scrollHeight directly on a clamped element returns the clamped
  * height, so that naive check would never detect overflow.
  */
-function HistoryEntry({ entry, onReEdit, onTogglePin }: HistoryEntryProps): JSX.Element {
+function HistoryEntry({ entry, highlighted, onReEdit, onTogglePin }: HistoryEntryProps): JSX.Element {
   const preRef = useRef<HTMLPreElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(false)
   const [overflowing, setOverflowing] = useState(false)
 
@@ -56,13 +61,23 @@ function HistoryEntry({ entry, onReEdit, onTogglePin }: HistoryEntryProps): JSX.
     setExpanded(false)
   }, [entry.content])
 
+  // Deep-link from the sidebar search (v1.26.1): scroll into view and fade.
+  useEffect(() => {
+    if (!highlighted) return
+    setExpanded(true)
+    rootRef.current?.scrollIntoView({ block: 'center' })
+  }, [highlighted])
+
   const collapsed = !expanded && overflowing
+  // Case-insensitive content match for the active query (v1.26.1).
+  const content = entry.content
 
   return (
     <div
+      ref={rootRef}
       className={`session-history-dialog__entry${
         entry.pinned ? ' session-history-dialog__entry--pinned' : ''
-      }`}
+      }${highlighted ? ' session-history-dialog__entry--focus' : ''}`}
     >
       <div className="session-history-dialog__entry-meta">
         <span className="session-history-dialog__time">
@@ -85,7 +100,7 @@ function HistoryEntry({ entry, onReEdit, onTogglePin }: HistoryEntryProps): JSX.
           collapsed ? ' session-history-dialog__content--collapsed' : ''
         }`}
       >
-        {entry.content}
+        {content}
       </pre>
       <div className="session-history-dialog__entry-actions">
         {overflowing && (
@@ -121,48 +136,85 @@ function HistoryEntry({ entry, onReEdit, onTogglePin }: HistoryEntryProps): JSX.
 interface SessionHistoryDialogProps {
   /** Session whose history is shown (null while closing). */
   session: AgentSession | null
-  /** This session's history entries (newest last, pinned-agnostic). */
+  /** This session's history entries (chronological, possibly long — v1.26.1 allows up to 500). */
   entries: SessionHistoryEntry[]
+  /** Entry to scroll-to/highlight on open (deep-link from sidebar search). */
+  focusEntryId?: string | null
   onClose: () => void
   /** Load an entry back into that session's markdown editor for editing. */
   onReEdit: (entry: SessionHistoryEntry) => void
-  /** Toggle an entry's pinned flag (pinned entries float to the top, v1.26). */
+  /** Toggle an entry's pinned flag (pinned entries float to the top). */
   onTogglePin: (entry: SessionHistoryEntry) => void
 }
 
 /**
  * Modal dialog listing a session's pasted/sent question history.
  *
- * Renders pinned entries first (then newest-first): timestamp + source
- * badge + content + per-entry actions — 置顶/取消置顶 and 重新编辑 (loads
- * the entry back into the markdown editor). Esc closes the dialog; clicking
- * the overlay (not the box) also closes it. Follows the `.new-session-dialog`
- * overlay pattern with a light theme.
+ * v1.26.1 scaling: the store may hold up to 500 entries per repo, so the
+ * list is (a) filterable by a case-insensitive content query and (b)
+ * rendered incrementally — PAGE_SIZE cards at first, a 加载更多 button
+ * extends the page. Sorting stays: pinned first, then newest-first.
  */
 export default function SessionHistoryDialog({
   session,
   entries,
+  focusEntryId,
   onClose,
   onReEdit,
   onTogglePin
 }: SessionHistoryDialogProps): JSX.Element | null {
-  // Close on Escape
+  const [query, setQuery] = useState('')
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  // Close on Escape (unless typing in the search box — Esc clears it first).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        if (query) {
+          setQuery('')
+        } else {
+          onClose()
+        }
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [onClose])
+  }, [onClose, query])
+
+  // Reset paging + search state whenever the dialog (re)opens for a session.
+  useEffect(() => {
+    if (session === null) return
+    setQuery('')
+    setVisibleCount(focusEntryId ? 500 : PAGE_SIZE)
+    if (focusEntryId) {
+      // Focus box opens directly via a search deep-link; no input focus.
+      return
+    }
+    // Auto-focus the search box for quick keyboard filtering.
+    const t = window.setTimeout(() => searchRef.current?.focus(), 50)
+    return () => window.clearTimeout(t)
+  }, [session?.id, focusEntryId])
+
+  // Filter → sort. Filtering is case-insensitive over the content.
+  const q = query.trim().toLowerCase()
+  const ordered = useMemo(() => {
+    const filtered = q
+      ? entries.filter((e) => e.content.toLowerCase().includes(q))
+      : entries
+    return sortHistoryEntries(filtered)
+  }, [entries, q])
+
+  // Focus entry must be visible even when it falls outside the first page.
+  const effectiveVisible = focusEntryId ? Math.max(visibleCount, 500) : visibleCount
+  const visible = ordered.slice(0, effectiveVisible)
+  const hasMore = ordered.length > visible.length
 
   if (session === null) {
     return null
   }
-
-  // Pinned first, then newest-first; non-mutating (v1.26).
-  const ordered = sortHistoryEntries(entries)
 
   return (
     <div
@@ -175,27 +227,66 @@ export default function SessionHistoryDialog({
         <div className="session-history-dialog__heading">
           <span className="session-history-dialog__title">
             「{session.title}」提问历史
-            <span className="session-history-dialog__count">（{entries.length} 条）</span>
+            <span className="session-history-dialog__count">
+              {q ? `（匹配 ${ordered.length} / ${entries.length} 条）` : `（${entries.length} 条）`}
+            </span>
           </span>
           <button className="session-history-dialog__close" onClick={onClose} title="关闭">
             ✕
           </button>
         </div>
 
+        {entries.length > 0 && (
+          <div className="session-history-dialog__search">
+            <input
+              ref={searchRef}
+              className="session-history-dialog__search-input"
+              placeholder="🔍 在提问历史中检索内容…"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                setVisibleCount(PAGE_SIZE)
+              }}
+              spellCheck={false}
+            />
+            {query && (
+              <button
+                className="session-history-dialog__search-clear"
+                onClick={() => setQuery('')}
+                title="清除检索"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        )}
+
         {entries.length === 0 ? (
           <div className="session-history-dialog__empty">
             暂无提问记录（从 Markdown 发送或向终端粘贴的内容会记录在这里）
           </div>
+        ) : ordered.length === 0 ? (
+          <div className="session-history-dialog__empty">没有匹配「{query}」的提问</div>
         ) : (
           <div className="session-history-dialog__list">
-            {ordered.map((entry) => (
+            {visible.map((entry) => (
               <HistoryEntry
                 key={entry.id}
                 entry={entry}
+                highlighted={focusEntryId === entry.id}
                 onReEdit={onReEdit}
                 onTogglePin={onTogglePin}
               />
             ))}
+            {hasMore && (
+              <button
+                type="button"
+                className="session-history-dialog__load-more"
+                onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+              >
+                加载更多（已显示 {visible.length} / {ordered.length}）
+              </button>
+            )}
           </div>
         )}
       </div>
