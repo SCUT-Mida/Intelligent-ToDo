@@ -1,6 +1,44 @@
 import { describe, it, expect } from 'vitest'
-import { buildHandoffPrompt, sortHistoryEntries } from '../../src/shared/agentHub'
+import {
+  buildHandoffPrompt,
+  sortHistoryEntries,
+  pruneHistoryEntries,
+  HISTORY_PRUNE_LIMIT
+} from '../../src/shared/agentHub'
 import type { SessionHistoryEntry } from '../../src/shared/agentHub'
+
+describe('pruneHistoryEntries (safety valve, v1.26.3)', () => {
+  const mk = (i: number, pinned = false): SessionHistoryEntry => ({
+    id: `e${i}`,
+    at: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+    content: `c${i}`,
+    source: 'markdown',
+    pinned
+  })
+
+  it('keeps everything when under the threshold', () => {
+    const entries = Array.from({ length: 50 }, (_, i) => mk(i))
+    expect(pruneHistoryEntries(entries)).toHaveLength(50)
+  })
+
+  it('keeps pinned entries regardless of age, trims old non-pinned', () => {
+    // 2 pinned old ones + 5050 non-pinned → pinned kept + newest 5000.
+    const entries = [mk(9000, true), mk(9001, true)]
+    for (let i = 0; i < HISTORY_PRUNE_LIMIT + 50; i++) entries.push(mk(i))
+    const out = pruneHistoryEntries(entries)
+    expect(out).toHaveLength(HISTORY_PRUNE_LIMIT + 2)
+    expect(out.filter((e) => e.pinned).map((e) => e.id)).toEqual(['e9000', 'e9001'])
+    // oldest surviving non-pinned is index 50
+    const nonPinned = out.filter((e) => !e.pinned)
+    expect(nonPinned[0].id).toBe('e50')
+    expect(nonPinned[nonPinned.length - 1].id).toBe(`e${HISTORY_PRUNE_LIMIT + 49}`)
+  })
+
+  it('handles the pathological case where pinned alone exceed nothing (all pinned kept)', () => {
+    const entries = Array.from({ length: HISTORY_PRUNE_LIMIT + 10 }, (_, i) => mk(i, true))
+    expect(pruneHistoryEntries(entries)).toHaveLength(entries.length)
+  })
+})
 
 describe('sortHistoryEntries (history pin, v1.26)', () => {
   const e = (id: string, at: string, pinned = false): SessionHistoryEntry => ({

@@ -326,10 +326,29 @@ export interface SessionHistoryEntry {
 }
 
 /**
- * Cap per-repo question history (v1.26.1: 100 → 500; dialog pages 30 at a
- * time). Existing stores are trimmed on next save.
+ * Safety-valve retention for per-repo question history (v1.26.3).
+ *
+ * Appends are NOT capped — the dialog pages and searches, so display cost
+ * doesn't depend on total count. The only real constraint is persistence:
+ * histories live in the whole-file agentHub-sessions.json, so unbounded
+ * growth would make every save expensive. We therefore prune only beyond
+ * this generous threshold, and PINNED entries are always exempt.
+ * (Long-term fix — per-repo append-only files — is on the roadmap.)
  */
-export const HISTORY_LIMIT = 500
+export const HISTORY_PRUNE_LIMIT = 5000
+
+/**
+ * Keep every pinned entry plus the newest non-pinned entries up to
+ * HISTORY_PRUNE_LIMIT. Chronological order within each group is preserved.
+ * Pure — unit tested.
+ */
+export function pruneHistoryEntries(entries: SessionHistoryEntry[]): SessionHistoryEntry[] {
+  if (entries.length <= HISTORY_PRUNE_LIMIT) return entries
+  const pinned = entries.filter((e) => e.pinned === true)
+  const rest = entries.filter((e) => e.pinned !== true)
+  const keptRest = rest.slice(-HISTORY_PRUNE_LIMIT)
+  return [...pinned, ...keptRest]
+}
 
 /**
  * Display order for history entries: pinned first, then by recency —

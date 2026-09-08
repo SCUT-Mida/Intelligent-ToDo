@@ -11,7 +11,7 @@ import type { MarkdownHandle } from '../../components/AgentHub/MarkdownEditor'
 import TerminalView from '../../components/AgentHub/TerminalView'
 import type { TerminalHandle } from '../../components/AgentHub/TerminalView'
 import type { AgentSession, AgentDescriptor, AgentDefinition, AgentHubData, AgentHubConfig, SessionHistoryEntry, TaskEvent, TaskRunInfo, SessionSearchHit } from '@shared/agentHub'
-import { createDefaultAgentHubData, buildHandoffPrompt, HISTORY_LIMIT } from '@shared/agentHub'
+import { createDefaultAgentHubData, buildHandoffPrompt, pruneHistoryEntries } from '@shared/agentHub'
 import '../../styles/agentHub.css'
 
 interface RepoEntry {
@@ -409,7 +409,7 @@ export default function AgentHubApp(): JSX.Element {
       }
       setHistories((prev) => ({
         ...prev,
-        [key]: [...(prev[key] ?? []), entry].slice(-HISTORY_LIMIT)
+        [key]: pruneHistoryEntries([...(prev[key] ?? []), entry])
       }))
       // Flag for persistence — without this the new entry would never be
       // written to disk (the persist effect only saves when flagged).

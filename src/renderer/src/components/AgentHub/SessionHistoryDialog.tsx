@@ -204,14 +204,12 @@ export default function SessionHistoryDialog({
   useEffect(() => {
     if (session === null) return
     setQuery('')
-    setVisibleCount(focusEntryId ? 500 : PAGE_SIZE)
-    if (focusEntryId) {
-      // Focus box opens directly via a search deep-link; no input focus.
-      return
+    setVisibleCount(PAGE_SIZE)
+    if (!focusEntryId) {
+      // Auto-focus the search box for quick keyboard filtering.
+      const t = window.setTimeout(() => searchRef.current?.focus(), 50)
+      return () => window.clearTimeout(t)
     }
-    // Auto-focus the search box for quick keyboard filtering.
-    const t = window.setTimeout(() => searchRef.current?.focus(), 50)
-    return () => window.clearTimeout(t)
   }, [session?.id, focusEntryId])
 
   // Filter → sort. Filtering is case-insensitive over the content.
@@ -223,8 +221,12 @@ export default function SessionHistoryDialog({
     return sortHistoryEntries(filtered)
   }, [entries, q])
 
-  // Focus entry must be visible even when it falls outside the first page.
-  const effectiveVisible = focusEntryId ? Math.max(visibleCount, 500) : visibleCount
+  // Render just enough pages to include the focus entry (v1.26.3) —
+  // previously this rendered up to 500 cards at once, making search
+  // deep-links janky to open.
+  const focusIndex = focusEntryId ? ordered.findIndex((e) => e.id === focusEntryId) : -1
+  const focusPages = focusIndex >= 0 ? Math.ceil((focusIndex + 1) / PAGE_SIZE) * PAGE_SIZE : 0
+  const effectiveVisible = Math.max(visibleCount, focusPages)
   const visible = ordered.slice(0, effectiveVisible)
   const hasMore = ordered.length > visible.length
 
