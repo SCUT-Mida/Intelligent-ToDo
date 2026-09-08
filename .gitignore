@@ -32,3 +32,6 @@ npm-debug.log*
 
 # Debug harness build output
 tmp/
+
+# Local documents (not part of the app)
+*.pptx
