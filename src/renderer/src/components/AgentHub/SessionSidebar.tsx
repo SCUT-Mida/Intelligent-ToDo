@@ -131,12 +131,12 @@ export default function SessionSidebar({
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   })
 
-  // Group sessions by workDir (repo). Groups are ordered by their newest
-  // session's activity so the most recently used repos float to the top.
+  // Group sessions by their ROOT repo — worktree-isolated sessions (v1.27)
+  // cluster under the main repo so parallel tasks of one repo sit together.
   const groupKeys: string[] = []
   const groupsMap = new Map<string, AgentSession[]>()
   for (const s of sorted) {
-    const key = s.workDir || OTHER_GROUP
+    const key = s.worktree?.repoPath || s.workDir || OTHER_GROUP
     const arr = groupsMap.get(key)
     if (arr) {
       arr.push(s)
@@ -353,6 +353,14 @@ export default function SessionSidebar({
                             </div>
                           )}
                           <div className="agent-hub__sidebar-item-meta">
+                            {session.worktree && (
+                              <span
+                                className="agent-hub__sidebar-item-branch"
+                                title={`隔离工作树：${session.worktree.path}`}
+                              >
+                                ⎇ {session.worktree.branch.replace(/^task\//, '')}
+                              </span>
+                            )}
                             {session.launchCount > 0 && (
                               <>
                                 <span className="agent-hub__sidebar-item-count">

@@ -16,8 +16,9 @@ interface NewSessionDialogProps {
   /** Preferred preselected agent (the last-used one); falls back if unknown. */
   initialAgentId?: string
   onClose: () => void
-  /** Called with (agentId, workDir, title) when user confirms creation. */
-  onCreate: (agentId: string, workDir: string, title: string) => void
+  /** Called when user confirms creation. With isolate=true the parent creates
+   *  the worktree first; resolve false to release the busy state on failure. */
+  onCreate: (agentId: string, workDir: string, title: string, isolate: boolean) => void | Promise<boolean>
   onAddCustomAgent?: (command: string) => Promise<boolean>
 }
 
@@ -54,6 +55,11 @@ export default function NewSessionDialog({
   const [workDir, setWorkDir] = useState(initialWorkDir ?? '')
   const [title, setTitle] = useState('')
   const [titleTouched, setTitleTouched] = useState(false)
+  // Worktree isolation (v1.27): the session runs in a sibling git worktree
+  // with its own task branch, so several sessions can work one repo in
+  // parallel without stepping on each other's changes.
+  const [isolate, setIsolate] = useState(false)
+  const [creating, setCreating] = useState(false)
 
   const canCreate = agentId.length > 0 && workDir.length > 0
 
@@ -100,10 +106,20 @@ export default function NewSessionDialog({
   )
 
   const handleCreate = useCallback((): void => {
-    if (!canCreate) return
+    if (!canCreate || creating) return
     const finalTitle = title.trim() || suggestTitle(agentId, workDir)
-    onCreate(agentId, workDir, finalTitle)
-  }, [canCreate, title, suggestTitle, agentId, workDir, onCreate])
+    if (isolate) {
+      // Parent creates the worktree first (async git op) — stay busy until
+      // it resolves; false releases the busy state so the user can retry.
+      setCreating(true)
+      void (async () => {
+        const ok = await onCreate(agentId, workDir, finalTitle, true)
+        if (ok === false) setCreating(false)
+      })()
+      return
+    }
+    onCreate(agentId, workDir, finalTitle, false)
+  }, [canCreate, creating, title, suggestTitle, agentId, workDir, isolate, onCreate])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent): void => {
@@ -162,17 +178,37 @@ export default function NewSessionDialog({
           />
         </div>
 
+        {/* Worktree isolation (v1.27) */}
+        <div className="new-session-dialog__field">
+          <label className="new-session-dialog__isolate">
+            <input
+              type="checkbox"
+              checked={isolate}
+              onChange={(e) => setIsolate(e.target.checked)}
+              style={{ width: 15, height: 15, accentColor: 'var(--primary)', flexShrink: 0 }}
+            />
+            <span>
+              🔀 隔离工作树（git worktree）
+              <br />
+              <span className="new-session-dialog__isolate-hint">
+                在仓库同级创建独立工作树 + task 分支，本会话的改动与其他会话/任务完全隔离；
+                完成后用面板上的「合并回主仓」收尾（变基 + 快进合并，保持线性历史）。
+              </span>
+            </span>
+          </label>
+        </div>
+
         {/* Actions */}
         <div className="new-session-dialog__actions">
-          <button className="btn btn--ghost" onClick={onClose}>
+          <button className="btn btn--ghost" onClick={onClose} disabled={creating}>
             取消
           </button>
           <button
             className="btn btn--primary"
-            disabled={!canCreate}
+            disabled={!canCreate || creating}
             onClick={handleCreate}
           >
-            创建会话
+            {creating ? '正在创建工作树…' : '创建会话'}
           </button>
         </div>
       </div>

@@ -6,11 +6,12 @@ import SessionHistoryDialog from '../../components/AgentHub/SessionHistoryDialog
 import TaskRunDialog from '../../components/AgentHub/TaskRunDialog'
 import TaskTimeline from '../../components/AgentHub/TaskTimeline'
 import EnvDiagnoseDialog from '../../components/AgentHub/EnvDiagnoseDialog'
+import ConfirmDialog from '../../components/ConfirmDialog'
 import MarkdownEditor from '../../components/AgentHub/MarkdownEditor'
 import type { MarkdownHandle } from '../../components/AgentHub/MarkdownEditor'
 import TerminalView from '../../components/AgentHub/TerminalView'
 import type { TerminalHandle } from '../../components/AgentHub/TerminalView'
-import type { AgentSession, AgentDescriptor, AgentDefinition, AgentHubData, AgentHubConfig, SessionHistoryEntry, TaskEvent, TaskRunInfo, SessionSearchHit } from '@shared/agentHub'
+import type { AgentSession, AgentDescriptor, AgentDefinition, AgentHubData, AgentHubConfig, SessionHistoryEntry, TaskEvent, TaskRunInfo, SessionSearchHit, SessionWorktree } from '@shared/agentHub'
 import { createDefaultAgentHubData, buildHandoffPrompt, pruneHistoryEntries } from '@shared/agentHub'
 import '../../styles/agentHub.css'
 
@@ -113,6 +114,9 @@ export default function AgentHubApp(): JSX.Element {
   // pendingAgentHubTask), and runId → taskId links for write-back.
   const pendingHandoffRef = useRef<string | null>(null)
   const taskLinksRef = useRef(new Map<string, string>())
+  // runId → worktree for isolated task runs (v1.27): completion offers
+  // merge-back or keep-for-later.
+  const worktreeRunsRef = useRef(new Map<string, SessionWorktree>())
 
   // Refs to always have access to latest values in callbacks
   const selectedAgentIdRef = useRef(selectedAgentId)
@@ -284,6 +288,47 @@ export default function AgentHubApp(): JSX.Element {
           window.setTimeout(() => setFlash(null), 6000)
         }
       }
+
+      // Isolated-run follow-up (v1.27): on success offer merge-back into the
+      // main repo; failures/cancels keep the worktree for manual inspection.
+      const runWorktree = worktreeRunsRef.current.get(info.runId)
+      if (runWorktree) {
+        worktreeRunsRef.current.delete(info.runId)
+        if (info.status === 'finished') {
+          void (async () => {
+            const doMerge = window.confirm(
+              `隔离任务已完成。\n工作树：${runWorktree.path}\n分支：${runWorktree.branch}\n\n是否变基并合并回主仓？（取消则保留工作树，稍后可手动处理）`
+            )
+            if (!doMerge) {
+              setFlash(`隔离工作树已保留：${runWorktree.branch} @ ${runWorktree.path}`)
+              window.setTimeout(() => setFlash(null), 10000)
+              return
+            }
+            const merged = await window.agentHub.mergeWorktree(runWorktree, false)
+            if (!merged.ok) {
+              setFlash(`合并失败：${merged.error ?? '未知错误'}`)
+              window.setTimeout(() => setFlash(null), 10000)
+              return
+            }
+            setFlash(`✅ 已合并 ${merged.mergedCount ?? 0} 个提交到主仓。`)
+            const doCleanup = window.confirm('合并完成。是否删除该工作树和任务分支？')
+            if (doCleanup) {
+              const removed = await window.agentHub.removeWorktree(runWorktree, {
+                deleteBranch: true
+              })
+              if (!removed.ok) {
+                setFlash(`清理失败：${removed.error ?? '未知错误'}`)
+                window.setTimeout(() => setFlash(null), 10000)
+              }
+            }
+          })()
+        } else {
+          setFlash(
+            `隔离任务${info.status === 'cancelled' ? '已取消' : '失败'}，工作树已保留供检查：${runWorktree.path}（分支 ${runWorktree.branch}）`
+          )
+          window.setTimeout(() => setFlash(null), 12000)
+        }
+      }
     })
     window.agentHub.listTasks().then(setTaskRuns).catch(() => { /* non-fatal */ })
     return () => {
@@ -343,7 +388,30 @@ export default function AgentHubApp(): JSX.Element {
   }, [])
 
   const handleDialogCreate = useCallback(
-    (agentId: string, workDir: string, title: string): void => {
+    async (agentId: string, workDir: string, title: string, isolate: boolean): Promise<boolean> => {
+      let effectiveWorkDir = workDir
+      let worktree: AgentSession['worktree'] | undefined
+
+      // v1.27 worktree isolation: create the sibling worktree FIRST; the
+      // session's workDir then points at it. On failure keep the dialog open
+      // (busy state) and surface the reason.
+      if (isolate) {
+        try {
+          const result = await window.agentHub.createWorktree(workDir, title)
+          if (!result.ok || !result.path || !result.branch || !result.repoPath) {
+            setFlash(`创建隔离工作树失败：${result.error ?? '未知错误'}`)
+            window.setTimeout(() => setFlash(null), 8000)
+            return false
+          }
+          worktree = { repoPath: result.repoPath, branch: result.branch, path: result.path }
+          effectiveWorkDir = result.path
+        } catch (err) {
+          setFlash(`创建隔离工作树失败：${err instanceof Error ? err.message : String(err)}`)
+          window.setTimeout(() => setFlash(null), 8000)
+          return false
+        }
+      }
+
       const newSession: AgentSession = {
         id: `sess-${Date.now().toString(36)}`,
         title,
@@ -351,7 +419,8 @@ export default function AgentHubApp(): JSX.Element {
         // auto-title on the session's first prompt (v1.22).
         titleKind: 'rule',
         agentId,
-        workDir,
+        workDir: effectiveWorkDir,
+        worktree,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         launchCount: 0,
@@ -363,6 +432,15 @@ export default function AgentHubApp(): JSX.Element {
       setShowNewSessionDialog(false)
       setPendingWorkDir(null)
       pendingSaveRef.current++
+      if (worktree) {
+        // First run needs installed dependencies; the worktree is a fresh
+        // checkout without node_modules.
+        setFlash(
+          `隔离工作树已创建：${worktree.branch}\n注意：工作树不含 node_modules，首次使用前请先安装依赖。`
+        )
+        window.setTimeout(() => setFlash(null), 10000)
+      }
+      return true
     },
     []
   )
@@ -551,7 +629,7 @@ export default function AgentHubApp(): JSX.Element {
   }, [])
 
   const handleRunTask = useCallback(
-    async (sessionId: string, prompt: string, background: boolean): Promise<void> => {
+    async (sessionId: string, prompt: string, background: boolean, isolate = false): Promise<void> => {
       const session = sessionsRef.current.find((s) => s.id === sessionId)
       if (!session) return
       const agent = agentsRef.current.find((a) => a.id === session.agentId) ?? null
@@ -559,13 +637,34 @@ export default function AgentHubApp(): JSX.Element {
         console.error('Agent not found for task run', session.agentId)
         return
       }
+
+      // v1.27 isolation: run in a throwaway sibling worktree.
+      let runWorkDir = session.workDir
+      let runWorktree: NonNullable<AgentSession['worktree']> | null = null
+      if (isolate) {
+        try {
+          const created = await window.agentHub.createWorktree(session.workDir, prompt.slice(0, 40))
+          if (!created.ok || !created.path || !created.branch || !created.repoPath) {
+            setFlash(`创建隔离工作树失败：${created.error ?? '未知错误'}`)
+            window.setTimeout(() => setFlash(null), 8000)
+            return
+          }
+          runWorktree = { repoPath: created.repoPath, branch: created.branch, path: created.path }
+          runWorkDir = created.path
+        } catch (err) {
+          setFlash(`创建隔离工作树失败：${err instanceof Error ? err.message : String(err)}`)
+          window.setTimeout(() => setFlash(null), 8000)
+          return
+        }
+      }
+
       try {
         const result = await window.agentHub.runTask({
           sessionId,
           command: agent.command,
           outputMode: agent.outputMode,
           args: agent.args,
-          workDir: session.workDir,
+          workDir: runWorkDir,
           prompt,
           background
         })
@@ -578,6 +677,10 @@ export default function AgentHubApp(): JSX.Element {
         if (pendingHandoffRef.current && result.runId) {
           taskLinksRef.current.set(result.runId, pendingHandoffRef.current)
           pendingHandoffRef.current = null
+        }
+        // Link isolated runs so completion can offer merge/cleanup (v1.27).
+        if (runWorktree && result.runId) {
+          worktreeRunsRef.current.set(result.runId, runWorktree)
         }
         // Ensure the timeline tracks this session even if it was never loaded.
         setSessionEvents((prev) => (prev[sessionId] ? prev : { ...prev, [sessionId]: [] }))
@@ -600,6 +703,70 @@ export default function AgentHubApp(): JSX.Element {
   const handleSetSessionTab = useCallback((sessionId: string, tab: 'terminal' | 'tasks'): void => {
     setSessionTabs((prev) => ({ ...prev, [sessionId]: tab }))
   }, [])
+
+  // ── Worktree merge / cleanup (v1.27) ──────────────────────────────────
+  // Pending action for the ConfirmDialog (set by the panel header buttons).
+  const [pendingWorktreeAction, setPendingWorktreeAction] = useState<
+    | { kind: 'merge'; session: AgentSession; autoPush: boolean }
+    | { kind: 'cleanup'; session: AgentSession; force: boolean; deleteBranch: boolean }
+    | null
+  >(null)
+
+  const openMergeDialog = useCallback((session: AgentSession): void => {
+    setPendingWorktreeAction({ kind: 'merge', session, autoPush: false })
+  }, [])
+
+  const openCleanupDialog = useCallback((session: AgentSession): void => {
+    setPendingWorktreeAction({ kind: 'cleanup', session, force: false, deleteBranch: true })
+  }, [])
+
+  const runWorktreeMerge = useCallback(
+    async (session: AgentSession, autoPush: boolean): Promise<void> => {
+      if (!session.worktree) return
+      setPendingWorktreeAction(null)
+      const r = await window.agentHub.mergeWorktree(session.worktree, autoPush)
+      if (r.ok) {
+        const parts = [`已将 ${r.mergedCount ?? 0} 个提交合并到主仓分支`]
+        if (r.pushed) parts.push('并已推送到 origin')
+        else if (r.error) parts.push(r.error)
+        setFlash(`✅ ${parts.join('，')}。工作树已无未合并内容，可点「清理工作树」删除。`)
+        window.setTimeout(() => setFlash(null), 10000)
+      } else {
+        setFlash(`合并失败：${r.error ?? '未知错误'}`)
+        window.setTimeout(() => setFlash(null), 10000)
+      }
+    },
+    []
+  )
+
+  const runWorktreeCleanup = useCallback(
+    async (session: AgentSession, force: boolean, deleteBranch: boolean): Promise<void> => {
+      if (!session.worktree) return
+      setPendingWorktreeAction(null)
+      const r = await window.agentHub.removeWorktree(session.worktree, { force, deleteBranch })
+      if (r.ok) {
+        // Strip the worktree metadata; the session survives pointing at a
+        // now-removed path — drop it entirely if nothing else references it.
+        setSessions((prev) => prev.filter((s) => s.id !== session.id))
+        pendingSaveRef.current++
+        setFlash(`工作树已清理${deleteBranch ? `（分支 ${session.worktree.branch} 已删除）` : ''}，会话已移除。`)
+      } else {
+        setFlash(`清理失败：${r.error ?? '未知错误'}`)
+      }
+      window.setTimeout(() => setFlash(null), 10000)
+    },
+    []
+  )
+
+  const confirmWorktreeAction = useCallback((): void => {
+    const action = pendingWorktreeAction
+    if (!action) return
+    if (action.kind === 'merge') {
+      void runWorktreeMerge(action.session, action.autoPush)
+    } else {
+      void runWorktreeCleanup(action.session, action.force, action.deleteBranch)
+    }
+  }, [pendingWorktreeAction, runWorktreeMerge, runWorktreeCleanup])
 
   // ── Cross-session search (v1.23) ──────────────────────────────────────
 
@@ -829,6 +996,24 @@ export default function AgentHubApp(): JSX.Element {
                             >
                               🔍 诊断
                             </button>
+                            {s.worktree && (
+                              <>
+                                <button
+                                  className="btn btn--ghost agent-hub__panel-run agent-hub__panel-run--wt"
+                                  onClick={() => openMergeDialog(s)}
+                                  title={`把分支 ${s.worktree.branch} 变基到主仓当前分支并快进合并（线性历史，可选推送）`}
+                                >
+                                  ⇩ 合并回主仓
+                                </button>
+                                <button
+                                  className="btn btn--ghost agent-hub__panel-run"
+                                  onClick={() => openCleanupDialog(s)}
+                                  title="删除隔离工作树（可选删除任务分支），并移除本会话"
+                                >
+                                  🧹
+                                </button>
+                              </>
+                            )}
                           </div>
                           {/* TerminalView stays MOUNTED across tab switches so
                               the live PTY session survives (same reason panels
@@ -923,8 +1108,8 @@ export default function AgentHubApp(): JSX.Element {
             workDir={session.workDir}
             initialPrompt={taskDialogPrefill}
             onClose={handleCloseTaskDialog}
-            onRun={(prompt, background) => {
-              void handleRunTask(session.id, prompt, background)
+            onRun={(prompt, background, isolate) => {
+              void handleRunTask(session.id, prompt, background, isolate)
             }}
           />
         )
@@ -940,6 +1125,56 @@ export default function AgentHubApp(): JSX.Element {
             command={agent?.command ?? session.agentId}
             workDir={session.workDir}
             onClose={() => setDiagnoseSessionId(null)}
+          />
+        )
+      })()}
+
+      {/* Worktree merge / cleanup confirmation (v1.27) */}
+      {pendingWorktreeAction && (() => {
+        const wt = pendingWorktreeAction.session.worktree
+        if (!wt) return null
+        if (pendingWorktreeAction.kind === 'merge') {
+          const action = pendingWorktreeAction
+          return (
+            <ConfirmDialog
+              title="合并回主仓"
+              message={`将把任务分支「${wt.branch}」变基到主仓当前分支，然后快进合并（线性历史，无 merge commit）。`}
+              detail={`主仓：${wt.repoPath}\n工作树：${wt.path}`}
+              confirmText="变基并合并"
+              checkboxes={[
+                {
+                  label: '合并成功后推送到 origin',
+                  checked: action.autoPush,
+                  onChange: (v: boolean) => setPendingWorktreeAction({ ...action, autoPush: v })
+                }
+              ]}
+              onConfirm={confirmWorktreeAction}
+              onCancel={() => setPendingWorktreeAction(null)}
+            />
+          )
+        }
+        const action = pendingWorktreeAction
+        return (
+          <ConfirmDialog
+            title="清理工作树"
+            message={`将删除隔离工作树目录并移除本会话。`}
+            detail={`工作树：${wt.path}\n分支：${wt.branch}`}
+            confirmText="清理"
+            danger
+            checkboxes={[
+              {
+                label: `同时删除任务分支 ${wt.branch}`,
+                checked: action.deleteBranch,
+                onChange: (v: boolean) => setPendingWorktreeAction({ ...action, deleteBranch: v })
+              },
+              {
+                label: '强制删除（工作树有未提交改动时也要删）',
+                checked: action.force,
+                onChange: (v: boolean) => setPendingWorktreeAction({ ...action, force: v })
+              }
+            ]}
+            onConfirm={confirmWorktreeAction}
+            onCancel={() => setPendingWorktreeAction(null)}
           />
         )
       })()}

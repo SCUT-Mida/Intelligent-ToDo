@@ -2319,3 +2319,56 @@
   color: var(--danger);
   background: var(--danger-soft);
 }
+
+/* ── Worktree isolation (v1.27) ──────────────────────────────────────────── */
+
+.agent-hub__sidebar-item-branch {
+  font-size: 10px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-radius: 4px;
+  padding: 0 6px;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.agent-hub__panel-run--wt {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.new-session-dialog__isolate {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.new-session-dialog__isolate-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  line-height: 1.6;
+}
+
+.confirm-dialog__checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.confirm-dialog__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}

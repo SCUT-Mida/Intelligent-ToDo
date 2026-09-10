@@ -8,7 +8,8 @@ interface TaskRunDialogProps {
   /** Pre-filled prompt (e.g. cross-app task hand-off from Todo). */
   initialPrompt?: string
   onClose: () => void
-  onRun: (prompt: string, background: boolean) => void
+  /** isolate=true: the parent creates a throwaway worktree and runs there. */
+  onRun: (prompt: string, background: boolean, isolate: boolean) => void
 }
 
 /**
@@ -27,6 +28,9 @@ export default function TaskRunDialog({
 }: TaskRunDialogProps): JSX.Element {
   const [prompt, setPrompt] = useState(initialPrompt ?? '')
   const [background, setBackground] = useState(true)
+  // v1.27: run in a throwaway sibling worktree so the task's changes never
+  // touch the main checkout.
+  const [isolate, setIsolate] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -37,7 +41,7 @@ export default function TaskRunDialog({
 
   const handleRun = (): void => {
     if (!canRun) return
-    onRun(prompt.trim(), background)
+    onRun(prompt.trim(), background, isolate)
   }
 
   return (
@@ -83,6 +87,16 @@ export default function TaskRunDialog({
               onChange={(e) => setBackground(e.target.checked)}
             />
             <span>后台运行（可切换到其他应用，完成后事件照常记录）</span>
+          </label>
+          <label className="task-run-dialog__bg">
+            <input
+              type="checkbox"
+              checked={isolate}
+              onChange={(e) => setIsolate(e.target.checked)}
+            />
+            <span>
+              🔀 隔离工作树运行（改动不碰主仓；完成后询问合并或保留）
+            </span>
           </label>
         </div>
         <div className="modal__footer">

@@ -87,6 +87,50 @@ export const TASK_IPC = {
   SEARCH: 'agentHub:search'
 } as const
 
+/**
+ * Worktree isolation IPC (v1.27). The renderer orchestrates: create before
+ * session creation / task runs, merge+cleanup when the user decides.
+ */
+export const WORKTREE_IPC = {
+  /** Create a sibling worktree with a fresh task branch. */
+  CREATE: 'agentHub:worktree:create',
+  /** Rebase the task branch onto the repo's checked-out branch + ff merge (+ optional push). */
+  MERGE: 'agentHub:worktree:merge',
+  /** Remove the worktree (and optionally its branch). */
+  REMOVE: 'agentHub:worktree:remove'
+} as const
+
+export interface WorktreeCreateResult {
+  ok: boolean
+  repoPath?: string
+  branch?: string
+  path?: string
+  error?: string
+}
+
+export interface WorktreeMergeResult {
+  ok: boolean
+  /** True when the rebase hit conflicts (auto-aborted; worktree intact). */
+  conflict?: boolean
+  /** True when the optional push to origin succeeded. */
+  pushed?: boolean
+  /** Commits carried into the main branch. */
+  mergedCount?: number
+  error?: string
+}
+
+export interface WorktreeRemoveOptions {
+  /** Force removal even when the worktree is dirty. */
+  force?: boolean
+  /** Also delete the task branch (`-D`, losing unmerged commits). */
+  deleteBranch?: boolean
+}
+
+export interface WorktreeRemoveResult {
+  ok: boolean
+  error?: string
+}
+
 /** Push events for task runs (main → renderer). */
 export const TASK_STREAM = {
   /** One structured TaskEvent was produced (persisted + pushed live). */
@@ -290,6 +334,20 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
 // ── Sessions ───────────────────────────────────────────────────────────────
 
 /**
+ * Worktree isolation for a session (v1.27): the session's workDir points at
+ * a dedicated `git worktree` checkout with its own task branch, so multiple
+ * tasks can run in parallel against the same repo without conflicting.
+ */
+export interface SessionWorktree {
+  /** The MAIN repo the worktree belongs to (sidebar groups by this). */
+  repoPath: string
+  /** Task branch checked out in the worktree, e.g. `task/fix-login`. */
+  branch: string
+  /** Absolute worktree path — the session's actual workDir. */
+  path: string
+}
+
+/**
  * A saved agent session — METADATA ONLY. Records which agent to launch in
  * which directory. The actual terminal process is ephemeral.
  */
@@ -307,6 +365,8 @@ export interface AgentSession {
   titleKind?: 'rule' | 'auto' | 'manual'
   agentId: string
   workDir: string
+  /** Present when the session runs in an isolated git worktree (v1.27). */
+  worktree?: SessionWorktree
   createdAt: string
   updatedAt: string
   launchCount: number

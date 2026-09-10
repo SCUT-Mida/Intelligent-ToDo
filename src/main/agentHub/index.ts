@@ -11,7 +11,7 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { execFileSync } from 'child_process'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import { AGENT_IPC, TASK_IPC } from '../../shared/agentHub'
+import { AGENT_IPC, TASK_IPC, WORKTREE_IPC } from '../../shared/agentHub'
 import type {
   AgentHubData,
   AgentHubConfig,
@@ -23,7 +23,12 @@ import type {
   TaskRunInfo,
   TaskEvent,
   SessionSearchHit,
-  EnvDiagnosisResult
+  EnvDiagnosisResult,
+  WorktreeCreateResult,
+  WorktreeMergeResult,
+  WorktreeRemoveOptions,
+  WorktreeRemoveResult,
+  SessionWorktree
 } from '../../shared/agentHub'
 import { detectAgents } from './detect'
 import { loadSessions, saveSessions } from './persistence'
@@ -32,6 +37,7 @@ import { createPty, sendInput, resizePty, killPty, killAllPtys } from './pty'
 import { runTask, cancelTask, listTasks, getSessionEvents, cancelAllTasks } from './taskRunner'
 import { searchSessions } from './search'
 import { diagnoseEnvironment } from './diagnose'
+import { createWorktree, mergeWorktree, removeWorktree } from './worktree'
 import { openRepoInTerminal } from '../repoNav/launcher'
 import { getConfig as getRepoNavConfig } from '../repoNav/config'
 import { logger } from '../logger'
@@ -171,6 +177,26 @@ export function registerAgentHubIpc(ipc: typeof ipcMain): void {
     AGENT_IPC.DIAGNOSE_ENV,
     (_e, command: string, workDir: string): EnvDiagnosisResult => {
       return diagnoseEnvironment(command ?? '', workDir ?? '')
+    }
+  )
+
+  // ── Worktree isolation (v1.27) ───────────────────────────────────────────
+  ipc.handle(
+    WORKTREE_IPC.CREATE,
+    async (_e, repoPath: string, slugSeed: string): Promise<WorktreeCreateResult> => {
+      return createWorktree(repoPath ?? '', slugSeed ?? '')
+    }
+  )
+  ipc.handle(
+    WORKTREE_IPC.MERGE,
+    async (_e, worktree: SessionWorktree, autoPush: boolean): Promise<WorktreeMergeResult> => {
+      return mergeWorktree(worktree, autoPush === true)
+    }
+  )
+  ipc.handle(
+    WORKTREE_IPC.REMOVE,
+    async (_e, worktree: SessionWorktree, opts: WorktreeRemoveOptions): Promise<WorktreeRemoveResult> => {
+      return removeWorktree(worktree, opts ?? {})
     }
   )
 

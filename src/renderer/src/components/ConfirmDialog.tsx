@@ -1,5 +1,12 @@
 import { useEffect, useRef } from 'react'
 
+/** Optional checkbox rendered above the footer (e.g. merge push / cleanup force). */
+export interface ConfirmCheckbox {
+  label: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+}
+
 interface ConfirmDialogProps {
   title: string
   /** Main message (supports \n). */
@@ -10,6 +17,8 @@ interface ConfirmDialogProps {
   cancelText?: string
   /** Danger styling for the confirm button (destructive actions). */
   danger?: boolean
+  /** Optional checkboxes shown between message and footer. */
+  checkboxes?: ConfirmCheckbox[]
   onConfirm: () => void
   onCancel: () => void
 }
@@ -18,7 +27,7 @@ interface ConfirmDialogProps {
  * Shared confirmation dialog (v1.23) — replaces ad-hoc window.confirm calls
  * for flows that benefit from showing the exact payload (command strings,
  * templates). Follows the NewSessionDialog overlay idiom: backdrop-click and
- * Esc cancel, Enter confirms.
+ * Esc cancel, Enter confirms. v1.27 adds optional checkboxes.
  */
 export default function ConfirmDialog({
   title,
@@ -27,6 +36,7 @@ export default function ConfirmDialog({
   confirmText = '确认',
   cancelText = '取消',
   danger = false,
+  checkboxes,
   onConfirm,
   onCancel
 }: ConfirmDialogProps): JSX.Element {
@@ -51,6 +61,21 @@ export default function ConfirmDialog({
         <div className="modal__body">
           <div className="confirm-dialog__message">{message}</div>
           {detail && <pre className="confirm-dialog__detail">{detail}</pre>}
+          {checkboxes && checkboxes.length > 0 && (
+            <div className="confirm-dialog__checkboxes">
+              {checkboxes.map((c) => (
+                <label key={c.label} className="confirm-dialog__checkbox">
+                  <input
+                    type="checkbox"
+                    checked={c.checked}
+                    onChange={(e) => c.onChange(e.target.checked)}
+                    style={{ width: 15, height: 15, accentColor: 'var(--primary)', flexShrink: 0 }}
+                  />
+                  <span>{c.label}</span>
+                </label>
+              ))}
+            </div>
+          )}
         </div>
         <div className="modal__footer">
           <button className="btn btn--ghost" onClick={onCancel}>{cancelText}</button>

@@ -4,7 +4,7 @@ import { IPC } from '../shared/repoNav'
 import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry, RepoIndex, RepoUserData, ToolProbeResult } from '../shared/repoNav'
 import { AI_IPC } from '../shared/aiConfig'
 import type { AiConfigScanResult } from '../shared/aiConfig'
-import { AGENT_IPC, PTY_STREAM, TASK_IPC, TASK_STREAM } from '../shared/agentHub'
+import { AGENT_IPC, PTY_STREAM, TASK_IPC, TASK_STREAM, WORKTREE_IPC } from '../shared/agentHub'
 import type {
   AgentDescriptor,
   AgentHubData,
@@ -17,7 +17,12 @@ import type {
   TaskRunInfo,
   TaskEvent,
   SessionSearchHit,
-  EnvDiagnosisResult
+  EnvDiagnosisResult,
+  WorktreeCreateResult,
+  WorktreeMergeResult,
+  WorktreeRemoveOptions,
+  WorktreeRemoveResult,
+  SessionWorktree
 } from '../shared/agentHub'
 import { API_TOOL_IPC } from '../shared/apiTool'
 import type { ApiRequestSpec, ApiResponseResult, ApiToolData, ApiToolSettings } from '../shared/apiTool'
@@ -223,6 +228,17 @@ const agentHub = {
    */
   diagnoseEnv: (command: string, workDir: string): Promise<EnvDiagnosisResult> =>
     ipcRenderer.invoke(AGENT_IPC.DIAGNOSE_ENV, command, workDir),
+
+  // ── Worktree isolation (v1.27) ──
+  /** Create a sibling worktree with a fresh task branch for the repo. */
+  createWorktree: (repoPath: string, slugSeed: string): Promise<WorktreeCreateResult> =>
+    ipcRenderer.invoke(WORKTREE_IPC.CREATE, repoPath, slugSeed),
+  /** Rebase task branch onto the repo's checked-out branch, ff-merge, optionally push. */
+  mergeWorktree: (worktree: SessionWorktree, autoPush: boolean): Promise<WorktreeMergeResult> =>
+    ipcRenderer.invoke(WORKTREE_IPC.MERGE, worktree, autoPush),
+  /** Remove the worktree (and optionally its task branch). */
+  removeWorktree: (worktree: SessionWorktree, opts: WorktreeRemoveOptions): Promise<WorktreeRemoveResult> =>
+    ipcRenderer.invoke(WORKTREE_IPC.REMOVE, worktree, opts),
 
   // ── PTY event subscriptions (each returns an unsubscribe function) ──
   /** Subscribe to PTY output data. */
