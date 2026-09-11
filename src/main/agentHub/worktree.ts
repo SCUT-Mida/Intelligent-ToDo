@@ -14,7 +14,7 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { basename, dirname, isAbsolute, join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, rmSync } from 'fs'
 import type { SessionWorktree, WorktreeCreateResult, WorktreeMergeResult, WorktreeRemoveOptions, WorktreeRemoveResult } from '../../shared/agentHub'
 import { slugifyBranchSuffix, worktreeDirName, worktreeBranchName } from '../../shared/worktreeUtils'
 import { effectiveGitBinary } from '../toolPaths'
@@ -173,28 +173,54 @@ export async function mergeWorktree(
 /**
  * Remove the worktree and optionally its task branch. Refuses dirty
  * worktrees unless force is set.
+ *
+ * Self-healing (v1.27.1): when the worktree directory has already vanished
+ * from disk (manual delete in Explorer, external cleanup tools), plain
+ * `git worktree remove` fails with "'<path>' is not a working tree" because
+ * realpath validation needs the directory to exist. In that case we
+ * `git worktree prune` the stale registration and delete any leftover
+ * directory ourselves — the user's intent (clean it up) is fulfilled, not
+ * reported as an error.
  */
 export async function removeWorktree(
   worktree: SessionWorktree,
   opts: WorktreeRemoveOptions
 ): Promise<WorktreeRemoveResult> {
   const { repoPath, branch, path } = worktree
-  if (!existsSync(path)) {
-    // Already gone — treat as success so cleanup can complete.
-    if (opts.deleteBranch) {
-      await git(['branch', '-D', branch], repoPath)
+  let removed = false
+
+  if (existsSync(path)) {
+    const remove = await git(['worktree', 'remove', ...(opts.force ? ['--force'] : []), path], repoPath)
+    if (remove.ok) {
+      removed = true
+    } else if (/is not a working tree|does not exist/i.test(remove.stderr)) {
+      // Directory gone / stale registration — healed below.
+      logger.warn('agentHub:worktree', 'stale worktree registration, healing', { path })
+    } else {
+      const dirty = /dirty|modified|untracked/i.test(remove.stderr)
+      return {
+        ok: false,
+        error: dirty
+          ? '工作树有未提交/未跟踪的改动，拒绝删除。确认不要了可勾选「强制删除」重试。'
+          : `删除工作树失败：${firstLine(remove.stderr)}`
+      }
     }
-    return { ok: true }
   }
 
-  const remove = await git(['worktree', 'remove', ...(opts.force ? ['--force'] : []), path], repoPath)
-  if (!remove.ok) {
-    const dirty = /dirty|modified|untracked/i.test(remove.stderr)
-    return {
-      ok: false,
-      error: dirty
-        ? '工作树有未提交/未跟踪的改动，拒绝删除。确认不要了可勾选「强制删除」重试。'
-        : `删除工作树失败：${firstLine(remove.stderr)}`
+  // Prune stale registrations (missing directories) either way.
+  const prune = await git(['worktree', 'prune'], repoPath)
+  if (!prune.ok) {
+    logger.warn('agentHub:worktree', 'worktree prune failed', { stderr: firstLine(prune.stderr) })
+  }
+  // Remove any leftover directory that the plain remove missed.
+  if (!removed && existsSync(path)) {
+    try {
+      rmSync(path, { recursive: true, force: true })
+    } catch (err) {
+      logger.warn('agentHub:worktree', 'leftover removal failed', {
+        path,
+        error: err instanceof Error ? err.message : String(err)
+      })
     }
   }
 
