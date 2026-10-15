@@ -35,6 +35,8 @@ interface SessionSidebarProps {
    * session list and the newly-selected session becomes visible.
    */
   onRegisterClearSearch: (clear: () => void) => void
+  /** Open the scheduled-tasks manager (v1.28). */
+  onOpenSchedules: () => void
 }
 
 /**
@@ -91,7 +93,8 @@ export default function SessionSidebar({
   searchResults,
   searching,
   onSelectResult,
-  onRegisterClearSearch
+  onRegisterClearSearch,
+  onOpenSchedules
 }: SessionSidebarProps): JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -247,9 +250,19 @@ export default function SessionSidebar({
             «
           </button>
         </div>
-        <button className="btn btn--primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={onNew}>
-          ＋ 新建会话
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            className="btn btn--ghost"
+            style={{ padding: '4px 8px', fontSize: 12 }}
+            onClick={onOpenSchedules}
+            title="定时任务（每日定时运行 agent 任务）"
+          >
+            ⏰
+          </button>
+          <button className="btn btn--primary" style={{ padding: '4px 12px', fontSize: 12 }} onClick={onNew}>
+            ＋ 新建会话
+          </button>
+        </div>
       </div>
       <div className="agent-hub__sidebar-search">
         <input

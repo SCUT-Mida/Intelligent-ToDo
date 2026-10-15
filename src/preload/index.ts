@@ -4,7 +4,7 @@ import { IPC } from '../shared/repoNav'
 import type { RepoNavConfig, OpenRepoResult, ScanResult, RepoEntry, RepoIndex, RepoUserData, ToolProbeResult } from '../shared/repoNav'
 import { AI_IPC } from '../shared/aiConfig'
 import type { AiConfigScanResult } from '../shared/aiConfig'
-import { AGENT_IPC, PTY_STREAM, TASK_IPC, TASK_STREAM, WORKTREE_IPC } from '../shared/agentHub'
+import { AGENT_IPC, PTY_STREAM, TASK_IPC, TASK_STREAM, WORKTREE_IPC, SCHEDULE_IPC } from '../shared/agentHub'
 import type {
   AgentDescriptor,
   AgentHubData,
@@ -22,7 +22,9 @@ import type {
   WorktreeMergeResult,
   WorktreeRemoveOptions,
   WorktreeRemoveResult,
-  SessionWorktree
+  SessionWorktree,
+  ScheduledTask,
+  AgentScheduleData
 } from '../shared/agentHub'
 import { API_TOOL_IPC } from '../shared/apiTool'
 import type { ApiRequestSpec, ApiResponseResult, ApiToolData, ApiToolSettings } from '../shared/apiTool'
@@ -239,6 +241,15 @@ const agentHub = {
   /** Remove the worktree (and optionally its task branch). */
   removeWorktree: (worktree: SessionWorktree, opts: WorktreeRemoveOptions): Promise<WorktreeRemoveResult> =>
     ipcRenderer.invoke(WORKTREE_IPC.REMOVE, worktree, opts),
+
+  // ── Scheduled tasks (v1.28) ──
+  /** Load all scheduled tasks. */
+  scheduleList: (): Promise<AgentScheduleData> => ipcRenderer.invoke(SCHEDULE_IPC.LIST),
+  /** Upsert one scheduled task (matched by id). */
+  scheduleSave: (task: ScheduledTask): Promise<boolean> =>
+    ipcRenderer.invoke(SCHEDULE_IPC.SAVE, task),
+  /** Delete a scheduled task by id. */
+  scheduleDelete: (id: string): Promise<boolean> => ipcRenderer.invoke(SCHEDULE_IPC.DELETE, id),
 
   // ── PTY event subscriptions (each returns an unsubscribe function) ──
   /** Subscribe to PTY output data. */

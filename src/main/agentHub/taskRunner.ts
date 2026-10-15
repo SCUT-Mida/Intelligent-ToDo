@@ -218,7 +218,9 @@ export function runTask(sender: WebContents | null, req: TaskRunRequest): TaskRu
         notifyBus.fire({
           kind: run.status === 'finished' ? 'task-done' : run.status === 'cancelled' ? 'info' : 'task-error',
           title: run.status === 'finished' ? 'Agent 任务完成' : run.status === 'cancelled' ? 'Agent 任务已取消' : 'Agent 任务失败',
-          body: `${req.command} · ${(run.resultText ?? '').slice(0, 120).replace(/\s+/g, ' ') || `退出码 ${exitCode}`}`
+          body: `${req.command} · ${(run.resultText ?? '').slice(0, 120).replace(/\s+/g, ' ') || `退出码 ${exitCode}`}`,
+          runId: run.runId,
+          sessionId: run.sessionId
         })
       }
       logger.info('agentHub:task', 'run ended', { runId, status: run.status, exitCode })

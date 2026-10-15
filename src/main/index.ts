@@ -8,6 +8,7 @@ import { createDefaultData } from '../shared/types'
 import { registerRepoNavIpc } from './repoNav'
 import { registerAgentHubIpc } from './agentHub'
 import { registerApiToolIpc } from './apiTool'
+import { initScheduler } from './agentHub/scheduler'
 import { killAllPtys, cancelAllTasks } from './agentHub'
 import { scanAiConfigs } from './aiConfigScanner'
 import { AI_IPC } from '../shared/aiConfig'
@@ -728,6 +729,9 @@ app.whenReady().then(() => {
 
   // Register API tool IPC handlers (login-free HTTP client, v1.25).
   registerApiToolIpc(ipcMain)
+
+  // Start the scheduled-task scheduler (agent daily runs, v1.28).
+  initScheduler()
 
   // Scan external AI tool configs (opencode.json) so the renderer can offer
   // a "import from existing config" option in settings.

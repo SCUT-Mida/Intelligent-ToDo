@@ -3,9 +3,10 @@ import {
   buildHandoffPrompt,
   sortHistoryEntries,
   pruneHistoryEntries,
-  HISTORY_PRUNE_LIMIT
+  HISTORY_PRUNE_LIMIT,
+  isScheduleDue
 } from '../../src/shared/agentHub'
-import type { SessionHistoryEntry } from '../../src/shared/agentHub'
+import type { SessionHistoryEntry, ScheduledTask } from '../../src/shared/agentHub'
 
 describe('pruneHistoryEntries (safety valve, v1.26.3)', () => {
   const mk = (i: number, pinned = false): SessionHistoryEntry => ({
@@ -37,6 +38,51 @@ describe('pruneHistoryEntries (safety valve, v1.26.3)', () => {
   it('handles the pathological case where pinned alone exceed nothing (all pinned kept)', () => {
     const entries = Array.from({ length: HISTORY_PRUNE_LIMIT + 10 }, (_, i) => mk(i, true))
     expect(pruneHistoryEntries(entries)).toHaveLength(entries.length)
+  })
+})
+
+describe('isScheduleDue (scheduled tasks, v1.28)', () => {
+  const task = (overrides: Partial<ScheduledTask> = {}): ScheduledTask => ({
+    id: 's1',
+    name: 'n',
+    agentId: 'a',
+    workDir: 'D:/x',
+    prompt: 'p',
+    hour: 9,
+    minute: 30,
+    enabled: true,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    ...overrides
+  })
+
+  it('is due when the scheduled time has passed and it has not run today', () => {
+    const now = new Date(2026, 2, 10, 10, 0) // 10:00, scheduled 09:30
+    expect(isScheduleDue(task(), now)).toBe(true)
+  })
+
+  it('is due exactly at the scheduled minute', () => {
+    expect(isScheduleDue(task(), new Date(2026, 2, 10, 9, 30))).toBe(true)
+  })
+
+  it('is not due before the scheduled time', () => {
+    expect(isScheduleDue(task(), new Date(2026, 2, 10, 9, 29))).toBe(false)
+  })
+
+  it('is not due when it already ran today (any earlier time)', () => {
+    const ran = task({ lastRunAt: new Date(2026, 2, 10, 9, 31).toISOString() })
+    expect(isScheduleDue(ran, new Date(2026, 2, 10, 10, 0))).toBe(false)
+  })
+
+  it('is due again the next day', () => {
+    const ran = task({ lastRunAt: new Date(2026, 2, 10, 9, 31).toISOString() })
+    expect(isScheduleDue(ran, new Date(2026, 2, 11, 9, 30))).toBe(true)
+  })
+
+  it('is not due when disabled or the time is invalid', () => {
+    expect(isScheduleDue(task({ enabled: false }), new Date(2026, 2, 10, 10, 0))).toBe(false)
+    expect(isScheduleDue(task({ hour: 25 }), new Date(2026, 2, 10, 10, 0))).toBe(false)
+    expect(isScheduleDue(task({ minute: 60 }), new Date(2026, 2, 10, 10, 0))).toBe(false)
   })
 })
 

@@ -11,7 +11,7 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { execFileSync } from 'child_process'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import { AGENT_IPC, TASK_IPC, WORKTREE_IPC } from '../../shared/agentHub'
+import { AGENT_IPC, TASK_IPC, WORKTREE_IPC, SCHEDULE_IPC } from '../../shared/agentHub'
 import type {
   AgentHubData,
   AgentHubConfig,
@@ -28,7 +28,9 @@ import type {
   WorktreeMergeResult,
   WorktreeRemoveOptions,
   WorktreeRemoveResult,
-  SessionWorktree
+  SessionWorktree,
+  ScheduledTask,
+  AgentScheduleData
 } from '../../shared/agentHub'
 import { detectAgents } from './detect'
 import { loadSessions, saveSessions } from './persistence'
@@ -38,6 +40,7 @@ import { runTask, cancelTask, listTasks, getSessionEvents, cancelAllTasks } from
 import { searchSessions } from './search'
 import { diagnoseEnvironment } from './diagnose'
 import { createWorktree, mergeWorktree, removeWorktree } from './worktree'
+import { listSchedules, saveSchedule, deleteSchedule } from './scheduler'
 import { openRepoInTerminal } from '../repoNav/launcher'
 import { getConfig as getRepoNavConfig } from '../repoNav/config'
 import { logger } from '../logger'
@@ -199,6 +202,11 @@ export function registerAgentHubIpc(ipc: typeof ipcMain): void {
       return removeWorktree(worktree, opts ?? {})
     }
   )
+
+  // ── Scheduled tasks (v1.28) ───────────────────────────────────────────────
+  ipc.handle(SCHEDULE_IPC.LIST, (): AgentScheduleData => listSchedules())
+  ipc.handle(SCHEDULE_IPC.SAVE, (_e, task: ScheduledTask): boolean => saveSchedule(task))
+  ipc.handle(SCHEDULE_IPC.DELETE, (_e, id: string): boolean => deleteSchedule(id))
 
   // ── Structured task runs (v1.23) ─────────────────────────────────────────  // RUN: spawn a one-shot agent run (non-PTY), parse output into TaskEvents,
   // append them to the session's JSONL log and push live to the renderer.

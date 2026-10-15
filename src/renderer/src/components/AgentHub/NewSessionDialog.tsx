@@ -11,6 +11,8 @@ interface RepoEntry {
 interface NewSessionDialogProps {
   agents: AgentDescriptor[]
   repos: RepoEntry[]
+  /** Recently used directories, most recent first (v1.28). */
+  recents?: string[]
   /** Pre-filled workDir when jumping from RepoNav. */
   initialWorkDir?: string
   /** Preferred preselected agent (the last-used one); falls back if unknown. */
@@ -38,6 +40,7 @@ interface NewSessionDialogProps {
 export default function NewSessionDialog({
   agents,
   repos,
+  recents = [],
   initialWorkDir,
   initialAgentId,
   onClose,
@@ -162,6 +165,7 @@ export default function NewSessionDialog({
             onChange={handleWorkDirChange}
             disabled={false}
             repos={repos}
+            recents={recents}
           />
         </div>
 

@@ -2372,3 +2372,144 @@
   color: var(--text);
   cursor: pointer;
 }
+
+/* ── Scheduled tasks dialog (v1.28) ─────────────────────────────────────── */
+
+.schedule-dialog {
+  width: 640px;
+  max-width: 94vw;
+}
+
+.schedule-dialog__hint {
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+.schedule-dialog__add {
+  margin-bottom: 10px;
+}
+
+.schedule-dialog__empty {
+  padding: 18px 0;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.schedule-dialog__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.schedule-dialog__item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.schedule-dialog__item-main {
+  min-width: 0;
+}
+
+.schedule-dialog__item-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.schedule-dialog__time {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--primary);
+}
+
+.schedule-dialog__time--off {
+  color: var(--text-faint);
+}
+
+.schedule-dialog__name {
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-dialog__badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 8px;
+}
+
+.schedule-dialog__badge--due {
+  color: #b45309;
+  border-color: #f59e0b;
+}
+
+.schedule-dialog__item-meta {
+  font-size: 11px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-dialog__item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.schedule-dialog__switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  margin-right: 4px;
+}
+
+.schedule-dialog__switch input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary);
+}
+
+.schedule-dialog__del:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.schedule-dialog__result {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  line-height: 1.6;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.schedule-dialog__prompt {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.6;
+}

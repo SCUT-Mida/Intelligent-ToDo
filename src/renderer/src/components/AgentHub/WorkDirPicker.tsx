@@ -12,15 +12,19 @@ interface WorkDirPickerProps {
   disabled?: boolean
   /** Repo entries for the repos dropdown. */
   repos: RepoEntry[]
+  /** Recently used directories, most recent first (v1.28). */
+  recents?: string[]
 }
 
 /**
  * Shows the current working directory path (or placeholder) with a
- * "浏览…" button that opens the OS folder picker via IPC, plus a
- * repo dropdown for quick selection from the repo index.
+ * "浏览…" button that opens the OS folder picker via IPC, a repo dropdown
+ * for the repo index, and a recents dropdown (v1.28) for quick re-selection
+ * of previously used folders (incl. non-repo directories).
  */
-export default function WorkDirPicker({ value, onChange, disabled, repos }: WorkDirPickerProps): JSX.Element {
+export default function WorkDirPicker({ value, onChange, disabled, repos, recents = [] }: WorkDirPickerProps): JSX.Element {
   const [reposOpen, setReposOpen] = useState(false)
+  const [recentsOpen, setRecentsOpen] = useState(false)
   const [repoSearch, setRepoSearch] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -36,17 +40,18 @@ export default function WorkDirPicker({ value, onChange, disabled, repos }: Work
     }
   }, [onChange, disabled])
 
-  // Close repo dropdown on click outside
+  // Close dropdowns on click outside
   useEffect(() => {
-    if (!reposOpen) return
+    if (!reposOpen && !recentsOpen) return
     function handleClick(e: MouseEvent): void {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setReposOpen(false)
+        setRecentsOpen(false)
       }
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
-  }, [reposOpen])
+  }, [reposOpen, recentsOpen])
 
   const filteredRepos = repos.filter((r) => {
     if (!repoSearch) return true
@@ -78,6 +83,44 @@ export default function WorkDirPicker({ value, onChange, disabled, repos }: Work
       >
         浏览…
       </button>
+      <div className="workdir-picker__repos-wrapper">
+        <button
+          className={`btn btn--ghost workdir-picker__repos-btn ${recentsOpen ? 'workdir-picker__repos-btn--open' : ''}`}
+          onClick={() => {
+            if (!disabled && recents.length > 0) {
+              setRecentsOpen((v) => !v)
+              setReposOpen(false)
+            }
+          }}
+          disabled={disabled || recents.length === 0}
+          title={recents.length > 0 ? '最近使用的目录' : '暂无最近使用的目录'}
+        >
+          🕐
+        </button>
+        {recentsOpen && (
+          <div className="workdir-picker__repos-dropdown">
+            <div className="workdir-picker__repos-list">
+              {recents.map((path) => {
+                const base = path.replace(/\\/g, '/').split('/').pop() ?? path
+                return (
+                  <div
+                    key={path}
+                    className={`workdir-picker__repos-item ${path === value ? 'workdir-picker__repos-item--selected' : ''}`}
+                    onClick={() => {
+                      onChange(path)
+                      setRecentsOpen(false)
+                    }}
+                    title={path}
+                  >
+                    <span className="workdir-picker__repos-item-name">🕐 {base}</span>
+                    <span className="workdir-picker__repos-item-path">{path}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
       <div className="workdir-picker__repos-wrapper">
         <button
           className={`btn btn--ghost workdir-picker__repos-btn ${reposOpen ? 'workdir-picker__repos-btn--open' : ''}`}

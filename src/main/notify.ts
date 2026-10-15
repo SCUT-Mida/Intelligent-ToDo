@@ -17,6 +17,9 @@ export interface AppNotification {
   body: string
   /** Optional routing hint shown to the user when they click through. */
   kind: 'task-done' | 'task-error' | 'info'
+  /** Originating run / session (v1.28) — lets the scheduler track outcomes. */
+  runId?: string
+  sessionId?: string
 }
 
 class NotificationBus extends EventEmitter {

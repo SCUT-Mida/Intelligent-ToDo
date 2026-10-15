@@ -131,6 +131,86 @@ export interface WorktreeRemoveResult {
   error?: string
 }
 
+// ── Scheduled agent tasks (v1.28) ─────────────────────────────────────────────
+
+/** IPC channels for scheduled-task management (renderer → main). */
+export const SCHEDULE_IPC = {
+  /** Load all scheduled tasks. */
+  LIST: 'agentHub:schedule:list',
+  /** Upsert one scheduled task (matched by id). */
+  SAVE: 'agentHub:schedule:save',
+  /** Delete a scheduled task by id. */
+  DELETE: 'agentHub:schedule:delete'
+} as const
+
+/** Local-time daily schedule: run every day at HH:MM. */
+export interface ScheduledTask {
+  id: string
+  /** User-facing name, e.g. 「llm-wiki 知识库更新」. */
+  name: string
+  agentId: string
+  workDir: string
+  /** The prompt sent to the agent each run. */
+  prompt: string
+  /** Local time of day (24h). */
+  hour: number
+  minute: number
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+  /** ISO timestamp of the last (attempted) run. */
+  lastRunAt?: string | null
+  /** Outcome of the last run. */
+  lastStatus?: 'running' | 'ok' | 'error' | 'cancelled' | null
+}
+
+export interface AgentScheduleData {
+  version: 1
+  tasks: ScheduledTask[]
+}
+
+export function createDefaultScheduleData(): AgentScheduleData {
+  return { version: 1, tasks: [] }
+}
+
+/** Synthetic session id for a scheduled task's runs (its event log key). */
+export function scheduleSessionId(taskId: string): string {
+  return `sched-${taskId}`
+}
+
+/** True when the time-of-day is a valid HH:MM pair. */
+export function isValidScheduleTime(hour: unknown, minute: unknown): boolean {
+  return (
+    typeof hour === 'number' && Number.isInteger(hour) && hour >= 0 && hour <= 23 &&
+    typeof minute === 'number' && Number.isInteger(minute) && minute >= 0 && minute <= 59
+  )
+}
+
+/**
+ * Whether a task should run at `now`. Due when enabled, the scheduled
+ * time has passed (or is exactly now), and it has not already run today —
+ * so an app launched later in the day catches up the same day, and at
+ * most one run happens per calendar day. Pure — unit tested.
+ */
+export function isScheduleDue(task: ScheduledTask, now: Date): boolean {
+  if (!task.enabled) return false
+  if (!isValidScheduleTime(task.hour, task.minute)) return false
+  const nowMinutes = now.getHours() * 60 + now.getMinutes()
+  const dueMinutes = task.hour * 60 + task.minute
+  if (nowMinutes < dueMinutes) return false
+  if (task.lastRunAt) {
+    const last = new Date(task.lastRunAt)
+    if (!Number.isNaN(last.getTime())) {
+      const sameDay =
+        last.getFullYear() === now.getFullYear() &&
+        last.getMonth() === now.getMonth() &&
+        last.getDate() === now.getDate()
+      if (sameDay) return false
+    }
+  }
+  return true
+}
+
 /** Push events for task runs (main → renderer). */
 export const TASK_STREAM = {
   /** One structured TaskEvent was produced (persisted + pushed live). */
@@ -463,8 +543,16 @@ export interface AgentHubConfig {
    * Applied to both built-in and custom agents at detection time.
    */
   agentArgs: Record<string, string>
+  /**
+   * Recently used work directories, most recent first (v1.28) — quick-pick
+   * in the new-session dialog, esp. for plain folders that aren't repos.
+   * Deduplicated case-insensitively, capped at 15.
+   */
+  recentWorkDirs?: string[]
   updatedAt: string
 }
+
+export const RECENT_WORK_DIRS_LIMIT = 15
 
 export function createDefaultAgentHubConfig(): AgentHubConfig {
   return { version: 1, customAgents: [], agentArgs: {}, updatedAt: new Date().toISOString() }

@@ -6,13 +6,14 @@ import SessionHistoryDialog from '../../components/AgentHub/SessionHistoryDialog
 import TaskRunDialog from '../../components/AgentHub/TaskRunDialog'
 import TaskTimeline from '../../components/AgentHub/TaskTimeline'
 import EnvDiagnoseDialog from '../../components/AgentHub/EnvDiagnoseDialog'
+import ScheduleDialog from '../../components/AgentHub/ScheduleDialog'
 import ConfirmDialog from '../../components/ConfirmDialog'
 import MarkdownEditor from '../../components/AgentHub/MarkdownEditor'
 import type { MarkdownHandle } from '../../components/AgentHub/MarkdownEditor'
 import TerminalView from '../../components/AgentHub/TerminalView'
 import type { TerminalHandle } from '../../components/AgentHub/TerminalView'
 import type { AgentSession, AgentDescriptor, AgentDefinition, AgentHubData, AgentHubConfig, SessionHistoryEntry, TaskEvent, TaskRunInfo, SessionSearchHit, SessionWorktree } from '@shared/agentHub'
-import { createDefaultAgentHubData, buildHandoffPrompt, pruneHistoryEntries } from '@shared/agentHub'
+import { createDefaultAgentHubData, buildHandoffPrompt, pruneHistoryEntries, RECENT_WORK_DIRS_LIMIT, scheduleSessionId } from '@shared/agentHub'
 import '../../styles/agentHub.css'
 
 interface RepoEntry {
@@ -70,6 +71,10 @@ export default function AgentHubApp(): JSX.Element {
   const [selectedAgentId, setSelectedAgentId] = useState<string>('claude')
   const [repos, setRepos] = useState<RepoEntry[]>([])
   const [loading, setLoading] = useState(true)
+  // Recently used work dirs (v1.28) — quick-pick in the new-session dialog.
+  const [recents, setRecents] = useState<string[]>([])
+  // Scheduled-task dialog open state (v1.28).
+  const [scheduleOpen, setScheduleOpen] = useState(false)
 
   // Left-right column layout: sidebar width + collapse, shared markdown-editor width.
   const [sidebarWidth, setSidebarWidth] = useState(220)
@@ -198,6 +203,9 @@ export default function AgentHubApp(): JSX.Element {
         if (idx?.repos) {
           setRepos(idx.repos)
         }
+        // Load recent work dirs (v1.28)
+        const cfg = await window.agentHub.getAgentConfig()
+        setRecents(cfg.recentWorkDirs ?? [])
         // Auto-select first session if available
         if (data.sessions.length > 0) {
           setActiveSessionId(data.sessions[0].id)
@@ -387,8 +395,29 @@ export default function AgentHubApp(): JSX.Element {
     setShowNewSessionDialog(true)
   }, [])
 
+  // ── Recent work dirs (v1.28) ──────────────────────────────────────────
+  // Most-recent-first, deduped case-insensitively (Windows paths), capped.
+  const pushRecentWorkDir = useCallback((dir: string): void => {
+    if (!dir) return
+    setRecents((prev) => {
+      const next = [dir, ...prev.filter((p) => p.toLowerCase() !== dir.toLowerCase())].slice(
+        0,
+        RECENT_WORK_DIRS_LIMIT
+      )
+      void window.agentHub
+        .getAgentConfig()
+        .then((cfg) =>
+          window.agentHub.saveAgentConfig({ ...cfg, recentWorkDirs: next, updatedAt: new Date().toISOString() })
+        )
+        .catch((err: unknown) => console.error('Failed to save recents', err))
+      return next
+    })
+  }, [])
+
   const handleDialogCreate = useCallback(
     async (agentId: string, workDir: string, title: string, isolate: boolean): Promise<boolean> => {
+      // v1.28: remember the user-facing directory for the quick-pick list.
+      pushRecentWorkDir(workDir)
       let effectiveWorkDir = workDir
       let worktree: AgentSession['worktree'] | undefined
 
@@ -442,7 +471,7 @@ export default function AgentHubApp(): JSX.Element {
       }
       return true
     },
-    []
+    [pushRecentWorkDir]
   )
 
   const handleDialogClose = useCallback((): void => {
@@ -884,6 +913,7 @@ export default function AgentHubApp(): JSX.Element {
         searching={searching}
         onSelectResult={handleSelectSearchResult}
         onRegisterClearSearch={setClearSidebarSearch}
+        onOpenSchedules={() => setScheduleOpen(true)}
       />
 
       <div className="agent-hub__main">
@@ -1075,6 +1105,7 @@ export default function AgentHubApp(): JSX.Element {
         <NewSessionDialog
           agents={agents}
           repos={repos}
+          recents={recents}
           initialWorkDir={pendingWorkDir ?? undefined}
           initialAgentId={selectedAgentId}
           onClose={handleDialogClose}
@@ -1128,6 +1159,36 @@ export default function AgentHubApp(): JSX.Element {
           />
         )
       })()}
+
+      {/* Scheduled-task manager (v1.28) */}
+      {scheduleOpen && (
+        <ScheduleDialog
+          agents={agents}
+          repos={repos}
+          recents={recents}
+          onClose={() => setScheduleOpen(false)}
+          onRunNow={(task) => {
+            void window.agentHub
+              .runTask({
+                sessionId: scheduleSessionId(task.id),
+                command: agents.find((a) => a.id === task.agentId)?.command ?? task.agentId,
+                outputMode: agents.find((a) => a.id === task.agentId)?.outputMode ?? 'generic',
+                args: agents.find((a) => a.id === task.agentId)?.args,
+                workDir: task.workDir,
+                prompt: task.prompt,
+                background: true
+              })
+              .then((r) => {
+                if (r.ok) {
+                  setFlash(`已开始运行定时任务「${task.name}」，完成后会有系统通知。`)
+                } else {
+                  setFlash(`启动失败：${r.error ?? '未知错误'}`)
+                }
+                window.setTimeout(() => setFlash(null), 8000)
+              })
+          }}
+        />
+      )}
 
       {/* Worktree merge / cleanup confirmation (v1.27) */}
       {pendingWorktreeAction && (() => {
