@@ -146,12 +146,18 @@ export const SCHEDULE_IPC = {
 /** Local-time daily schedule: run every day at HH:MM. */
 export interface ScheduledTask {
   id: string
-  /** User-facing name, e.g. 「llm-wiki 知识库更新」. */
+  /** User-facing name, e.g. 「llm-wiki 知识库每日更新」. */
   name: string
   agentId: string
   workDir: string
   /** The prompt sent to the agent each run. */
   prompt: string
+  /**
+   * Extra CLI args for the HEADLESS run only (v1.28.1) — independent of the
+   * interactive agentArgs. Claude-系封装（如 codeagent）无头运行通常需要
+   * `-p` 才能把位置参数识别为提示词。
+   */
+  args?: string
   /** Local time of day (24h). */
   hour: number
   minute: number

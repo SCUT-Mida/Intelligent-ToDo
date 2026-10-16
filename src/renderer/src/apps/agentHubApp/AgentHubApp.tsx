@@ -1168,12 +1168,13 @@ export default function AgentHubApp(): JSX.Element {
           recents={recents}
           onClose={() => setScheduleOpen(false)}
           onRunNow={(task) => {
+            const agent = agents.find((a) => a.id === task.agentId)
             void window.agentHub
               .runTask({
                 sessionId: scheduleSessionId(task.id),
-                command: agents.find((a) => a.id === task.agentId)?.command ?? task.agentId,
-                outputMode: agents.find((a) => a.id === task.agentId)?.outputMode ?? 'generic',
-                args: agents.find((a) => a.id === task.agentId)?.args,
+                command: agent?.command ?? task.agentId,
+                outputMode: agent?.outputMode ?? 'generic',
+                args: task.args,
                 workDir: task.workDir,
                 prompt: task.prompt,
                 background: true

@@ -98,7 +98,10 @@ export function runTask(sender: WebContents | null, req: TaskRunRequest): TaskRu
     const runId = `run-${Date.now().toString(36)}`
     const child = spawn(file, finalArgs, {
       cwd: req.workDir || undefined,
-      env: { ...buildPtyEnv(), TERM: undefined }, // not a TTY; drop TERM forcing
+      // Headless-appropriate env: the PTY env rebuild (PATH etc.) is reused,
+      // but color/TUI forcing is disabled — CLIs that detect a color TTY
+      // would otherwise attempt interactive rendering and die without a TTY.
+      env: { ...buildPtyEnv(), TERM: 'dumb', FORCE_COLOR: '0', NO_COLOR: '1', CI: '1' },
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     })
@@ -131,6 +134,9 @@ export function runTask(sender: WebContents | null, req: TaskRunRequest): TaskRu
 
     let stdoutBuffer = ''
     let plainText = ''
+    // Diagnostics: keep the tail of stderr so "exit code 1" becomes
+    // explainable in the timeline/notification (v1.28.1).
+    let stderrTail = ''
     // The final claude 'result' line — held so run_finished can carry the
     // exit code; set from the stdout handler, consumed by settle().
     let pendingResult: ReturnType<typeof parseStreamJsonLine> = null
@@ -158,9 +164,11 @@ export function runTask(sender: WebContents | null, req: TaskRunRequest): TaskRu
     })
 
     child.stderr?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf-8').trim()
-      if (!text) return
-      logger.warn('agentHub:task', 'stderr', { runId, line: text.slice(0, 300) })
+      const text = chunk.toString('utf-8')
+      stderrTail = (stderrTail + text).slice(-2000)
+      const trimmed = text.trim()
+      if (!trimmed) return
+      logger.warn('agentHub:task', 'stderr', { runId, line: trimmed.slice(0, 300) })
     })
 
     const settle = (exitCode: number): void => {
@@ -170,6 +178,9 @@ export function runTask(sender: WebContents | null, req: TaskRunRequest): TaskRu
       run.exitCode = exitCode
       run.endedAt = new Date().toISOString()
 
+      const exitDetail = `agent 进程退出码 ${exitCode}${
+        stderrTail.trim() ? `：${stderrTail.trim().slice(-600)}` : ''
+      }`
       if (run.status === 'cancelled') {
         emit(sender, run, 'run_cancelled', { exitCode })
       } else if (req.outputMode === 'stream-json') {
@@ -195,7 +206,7 @@ export function runTask(sender: WebContents | null, req: TaskRunRequest): TaskRu
           emitParsed(sender, run, pendingResult)
         }
         if (run.status === 'error') {
-          emit(sender, run, 'run_error', { exitCode, error: `agent 进程退出码 ${exitCode}` })
+          emit(sender, run, 'run_error', { exitCode, error: exitDetail })
         }
       } else {
         // print / generic: whole stdout becomes one assistant message.
@@ -205,7 +216,7 @@ export function runTask(sender: WebContents | null, req: TaskRunRequest): TaskRu
         }
         run.resultText = text
         if (run.status === 'error') {
-          emit(sender, run, 'run_error', { exitCode, error: `agent 进程退出码 ${exitCode}` })
+          emit(sender, run, 'run_error', { exitCode, error: exitDetail })
         } else {
           emit(sender, run, 'run_finished', { exitCode, result: text.slice(0, 20000) })
         }

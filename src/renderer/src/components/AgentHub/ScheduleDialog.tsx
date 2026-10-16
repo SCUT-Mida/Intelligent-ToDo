@@ -234,6 +234,20 @@ export default function ScheduleDialog({ agents, repos, recents, onClose, onRunN
                 />
               </div>
               <div className="field">
+                <label className="field__label">启动参数（可选，仅本次无头运行生效）</label>
+                <input
+                  className="input"
+                  value={editing.args ?? ''}
+                  onChange={(e) => setEditing({ ...editing, args: e.target.value })}
+                  placeholder="如：-p"
+                  spellCheck={false}
+                />
+                <div className="field__hint">
+                  无头运行与交互终端的启动参数相互独立。Claude 系封装（codeagent / claude 等）通常需要
+                  <code className="inline-code">-p</code>，否则无法识别提示词导致退出码 1。
+                </div>
+              </div>
+              <div className="field">
                 <label className="field__label">任务提示词（每次运行发送给 agent）</label>
                 <textarea
                   className="input schedule-dialog__prompt"

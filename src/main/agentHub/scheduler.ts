@@ -143,7 +143,10 @@ async function startTask(task: ScheduledTask, now: Date): Promise<void> {
     sessionId: scheduleSessionId(task.id),
     command: agent.command,
     outputMode: agent.outputMode,
-    args: agent.args,
+    // Task args first so the task-specific headless flags (e.g. -p) apply;
+    // agent.args (interactive args) are NOT reused — headless invocations
+    // often need different flags than TUI sessions.
+    args: task.args ?? undefined,
     workDir: task.workDir,
     prompt: task.prompt,
     background: true
