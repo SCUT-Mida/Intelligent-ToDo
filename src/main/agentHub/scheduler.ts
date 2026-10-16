@@ -149,7 +149,8 @@ async function startTask(task: ScheduledTask, now: Date): Promise<void> {
     args: task.args ?? undefined,
     workDir: task.workDir,
     prompt: task.prompt,
-    background: true
+    background: true,
+    mode: task.mode ?? 'pty'
   })
   if (!result.ok || !result.runId) {
     task.lastRunAt = now.toISOString()

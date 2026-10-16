@@ -25,6 +25,9 @@ function newTask(): ScheduledTask {
     agentId: '',
     workDir: '',
     prompt: '',
+    // v1.28.2: interactive-paste is the default — it works with ANY TUI
+    // agent exactly like Agent 对话 sessions do.
+    mode: 'pty',
     hour: 9,
     minute: 0,
     enabled: true,
@@ -234,19 +237,47 @@ export default function ScheduleDialog({ agents, repos, recents, onClose, onRunN
                 />
               </div>
               <div className="field">
-                <label className="field__label">启动参数（可选，仅本次无头运行生效）</label>
-                <input
-                  className="input"
-                  value={editing.args ?? ''}
-                  onChange={(e) => setEditing({ ...editing, args: e.target.value })}
-                  placeholder="如：-p"
-                  spellCheck={false}
-                />
-                <div className="field__hint">
-                  无头运行与交互终端的启动参数相互独立。Claude 系封装（codeagent / claude 等）通常需要
-                  <code className="inline-code">-p</code>，否则无法识别提示词导致退出码 1。
+                <label className="field__label">运行方式</label>
+                <div className="radio-group">
+                  <label className="radio-group__item">
+                    <input
+                      type="radio"
+                      name="schedMode"
+                      checked={(editing.mode ?? 'pty') === 'pty'}
+                      onChange={() => setEditing({ ...editing, mode: 'pty' })}
+                      style={{ width: 16, height: 16, accentColor: 'var(--primary)' }}
+                    />
+                    <span className="field__row-text">交互粘贴（推荐）— 与 Agent 对话完全一致：真实终端启动后自动粘贴提示词，兼容所有 TUI agent</span>
+                  </label>
+                  <label className="radio-group__item">
+                    <input
+                      type="radio"
+                      name="schedMode"
+                      checked={editing.mode === 'headless'}
+                      onChange={() => setEditing({ ...editing, mode: 'headless' })}
+                      style={{ width: 16, height: 16, accentColor: 'var(--primary)' }}
+                    />
+                    <span className="field__row-text">参数无头 — 无终端运行（claude -p 流可获得结构化时间线，需 CLI 支持对应约定）</span>
+                  </label>
                 </div>
               </div>
+              {(editing.mode ?? 'pty') === 'headless' && (
+                <div className="field">
+                  <label className="field__label">启动参数（可选，仅无头运行生效）</label>
+                  <input
+                    className="input"
+                    value={editing.args ?? ''}
+                    onChange={(e) => setEditing({ ...editing, args: e.target.value })}
+                    placeholder="如：-p"
+                    spellCheck={false}
+                  />
+                  <div className="field__hint">
+                    无头运行与交互终端的启动参数相互独立。Claude 系封装通常需要
+                    <code className="inline-code">-p</code>，否则无法识别提示词导致退出码 1。
+                    若不确定，请改用「交互粘贴」模式。
+                  </div>
+                </div>
+              )}
               <div className="field">
                 <label className="field__label">任务提示词（每次运行发送给 agent）</label>
                 <textarea

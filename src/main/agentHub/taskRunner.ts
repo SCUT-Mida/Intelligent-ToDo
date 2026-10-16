@@ -15,7 +15,8 @@ import type { WebContents } from 'electron'
 import { spawn } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import {
-  TASK_STREAM
+  TASK_STREAM,
+  stripAnsiEscape
 } from '../../shared/agentHub'
 import type {
   TaskEvent,
@@ -25,7 +26,8 @@ import type {
 } from '../../shared/agentHub'
 import { logger } from '../logger'
 import { tokenizeArgs } from './args'
-import { buildSpawnTarget, buildPtyEnv } from './pty'
+import { buildSpawnTarget, buildPtyEnv, getPtyModule } from './pty'
+import type { IPty } from './pty'
 import { parseStreamJsonLine, buildTaskArgv } from './streamJson'
 import { appendSessionEvent, loadSessionEvents, nextSeqFor } from './eventLog'
 import { recordTokenUsage } from '../tokenMeter'
@@ -37,7 +39,10 @@ interface ActiveRun {
   command: string
   workDir: string
   startedAt: string
-  child: ChildProcess
+  /** headless mode process. */
+  child?: ChildProcess
+  /** pty (interactive-paste) mode terminal. */
+  pty?: IPty
   status: TaskRunInfo['status']
   exitCode?: number
   endedAt?: string
@@ -87,6 +92,172 @@ function emit(
  * and TASK_STREAM.DONE when the run reaches a terminal state.
  */
 export function runTask(sender: WebContents | null, req: TaskRunRequest): TaskRunStartResult {
+  if (!req.prompt?.trim()) {
+    return { ok: false, error: '任务提示词不能为空' }
+  }
+  // v1.28.2: pty mode = interactive-paste, identical to Agent 对话 sessions.
+  if (req.mode === 'pty') {
+    return runPtyTask(sender, req)
+  }
+  return runHeadlessTask(sender, req)
+}
+
+// ── pty mode: real ConPTY + paste, any TUI agent (v1.28.2) ──────────────────
+
+/** Delay after spawn before pasting the prompt (agent startup). */
+const PTY_PASTE_DELAY_MS = 5000
+/** No-output window that ends the turn (agent finished responding). */
+const PTY_IDLE_TIMEOUT_MS = 10 * 60_000
+/** Hard cap on a pty-mode run. */
+const PTY_MAX_DURATION_MS = 2 * 60 * 60_000
+/** Grace period after the graceful /exit before force-killing. */
+const PTY_EXIT_GRACE_MS = 15_000
+/** ConPTY size for headless-ish pty runs. */
+const PTY_COLS = 160
+const PTY_ROWS = 40
+
+function runPtyTask(sender: WebContents | null, req: TaskRunRequest): TaskRunStartResult {
+  try {
+    const { file, args: resolvedArgs } = buildSpawnTarget(req.command)
+    const userArgs = req.args ? tokenizeArgs(req.args) : []
+    const finalArgs = [...resolvedArgs, ...userArgs]
+
+    const runId = `run-${Date.now().toString(36)}`
+    const pty = getPtyModule().spawn(file, finalArgs, {
+      name: 'xterm-256color',
+      cols: PTY_COLS,
+      rows: PTY_ROWS,
+      cwd: req.workDir || undefined,
+      env: buildPtyEnv()
+    }) as IPty
+
+    const run: ActiveRun = {
+      runId,
+      sessionId: req.sessionId,
+      command: req.command,
+      workDir: req.workDir,
+      startedAt: new Date().toISOString(),
+      pty,
+      status: 'running',
+      background: req.background === true
+    }
+    runs.set(runId, run)
+    pruneFinishedRuns()
+
+    logger.info('agentHub:task', 'pty run started', {
+      runId,
+      sessionId: req.sessionId,
+      command: req.command,
+      target: file,
+      workDir: req.workDir
+    })
+
+    emit(sender, run, 'run_started', { command: `${req.command} (pty 交互粘贴模式)`.trim() })
+    emit(sender, run, 'user_message', { prompt: req.prompt.trim() })
+
+    // Capture + strip ANSI as the stream arrives; the stripped text becomes
+    // the run's result. ConPTY redraws cause duplicates — best-effort text.
+    let raw = ''
+    const dataHandler = (data: string): void => {
+      raw += data
+      if (raw.length > 400_000) raw = raw.slice(-400_000)
+      bumpIdle()
+    }
+    pty.onData(dataHandler)
+
+    let settled = false
+    let exitCode = 0
+    const settle = (): void => {
+      if (settled) return
+      settled = true
+      clearTimers()
+      try { pty.kill() } catch { /* already dead */ }
+      run.status = run.status === 'cancelled' ? 'cancelled' : 'finished'
+      run.exitCode = exitCode
+      run.endedAt = new Date().toISOString()
+
+      const text = stripAnsiEscape(raw)
+        .split('\n')
+        .map((l) => l.replace(/\s+$/, ''))
+        .filter((l) => l.trim().length > 0)
+        .join('\n')
+      run.resultText = text
+      emit(sender, run, 'assistant_message', { text: text.slice(0, 50000) })
+      emit(sender, run, run.status === 'cancelled' ? 'run_cancelled' : 'run_finished', {
+        exitCode,
+        result: text.slice(0, 20000)
+      })
+      safeSend(sender, TASK_STREAM.DONE, run.sessionId, taskRunInfo(run))
+      if (run.background) {
+        notifyBus.fire({
+          kind: run.status === 'finished' ? 'task-done' : 'info',
+          title: run.status === 'finished' ? 'Agent 定时任务完成' : 'Agent 定时任务已取消',
+          body: `${req.command} · ${(text).slice(0, 120).replace(/\s+/g, ' ') || '(无输出)'}`,
+          runId: run.runId,
+          sessionId: run.sessionId
+        })
+      }
+      logger.info('agentHub:task', 'pty run ended', { runId, status: run.status })
+    }
+
+    // ── Timers: paste → idle → max duration → graceful exit ──
+    let idleTimer: NodeJS.Timeout | null = null
+    let maxTimer: NodeJS.Timeout | null = null
+    let killTimer: NodeJS.Timeout | null = null
+    const clearTimers = (): void => {
+      for (const t of [idleTimer, maxTimer, killTimer]) {
+        if (t) clearTimeout(t)
+      }
+      idleTimer = maxTimer = killTimer = null
+    }
+    const bumpIdle = (): void => {
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => finishTurn('idle'), PTY_IDLE_TIMEOUT_MS)
+      idleTimer.unref?.()
+    }
+    const finishTurn = (reason: 'idle' | 'max-duration'): void => {
+      if (settled) return
+      logger.info('agentHub:task', 'pty turn ending', { runId, reason })
+      try {
+        pty.write('/exit\r')
+      } catch { /* dead */ }
+      killTimer = setTimeout(() => {
+        if (settled) return
+        exitCode = 0
+        settle()
+      }, PTY_EXIT_GRACE_MS)
+      killTimer.unref?.()
+    }
+
+    pty.onExit((e) => {
+      exitCode = e.exitCode
+      settle()
+    })
+
+    // Startup → paste the prompt; arm idle + max timers.
+    const pasteTimer = setTimeout(() => {
+      try {
+        pty.write(req.prompt.trim() + '\r')
+        bumpIdle()
+      } catch (err) {
+        logger.warn('agentHub:task', 'pty paste failed', { runId, error: String(err) })
+      }
+    }, PTY_PASTE_DELAY_MS)
+    pasteTimer.unref?.()
+    maxTimer = setTimeout(() => finishTurn('max-duration'), PTY_MAX_DURATION_MS)
+    maxTimer.unref?.()
+
+    return { ok: true, runId }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logger.error('agentHub:task', 'pty run failed to start', { command: req.command, error: msg })
+    return { ok: false, error: msg }
+  }
+}
+
+// ── headless mode (previous behavior) ───────────────────────────────────────
+
+function runHeadlessTask(sender: WebContents | null, req: TaskRunRequest): TaskRunStartResult {
   if (!req.prompt?.trim()) {
     return { ok: false, error: '任务提示词不能为空' }
   }
@@ -283,13 +454,18 @@ function taskRunInfo(run: ActiveRun): TaskRunInfo {
   }
 }
 
-/** Cancel a running task (SIGKILL tree on Windows via taskkill). */
+/** Cancel a running task (kills the process/PTY; pty-mode settles via onExit). */
 export function cancelTask(runId: string): boolean {
   const run = runs.get(runId)
   if (!run || run.status !== 'running') return false
   run.status = 'cancelled'
   try {
-    run.child.kill()
+    run.child?.kill()
+  } catch {
+    /* already dead */
+  }
+  try {
+    run.pty?.kill()
   } catch {
     /* already dead */
   }
@@ -328,7 +504,8 @@ export function cancelAllTasks(): void {
   for (const run of runs.values()) {
     if (run.status === 'running') {
       run.status = 'cancelled'
-      try { run.child.kill() } catch { /* dead */ }
+      try { run.child?.kill() } catch { /* dead */ }
+      try { run.pty?.kill() } catch { /* dead */ }
     }
   }
 }

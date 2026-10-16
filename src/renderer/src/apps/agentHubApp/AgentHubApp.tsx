@@ -1177,7 +1177,8 @@ export default function AgentHubApp(): JSX.Element {
                 args: task.args,
                 workDir: task.workDir,
                 prompt: task.prompt,
-                background: true
+                background: true,
+                mode: task.mode ?? 'pty'
               })
               .then((r) => {
                 if (r.ok) {

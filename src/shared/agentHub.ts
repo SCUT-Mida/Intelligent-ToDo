@@ -158,6 +158,11 @@ export interface ScheduledTask {
    * `-p` 才能把位置参数识别为提示词。
    */
   args?: string
+  /**
+   * Run mode (v1.28.2): 'pty' = interactive paste (recommended, works with
+   * any TUI agent — same as Agent 对话); 'headless' = argv mode.
+   */
+  mode?: 'headless' | 'pty'
   /** Local time of day (24h). */
   hour: number
   minute: number
@@ -190,6 +195,24 @@ export function isValidScheduleTime(hour: unknown, minute: unknown): boolean {
     typeof hour === 'number' && Number.isInteger(hour) && hour >= 0 && hour <= 23 &&
     typeof minute === 'number' && Number.isInteger(minute) && minute >= 0 && minute <= 59
   )
+}
+
+/**
+ * Strip ANSI/VT escape sequences (CSI, OSC, and two-char escapes) from a
+ * captured PTY stream — best-effort text recovery for pty-mode task runs.
+ * Pure — unit tested.
+ */
+export function stripAnsiEscape(input: string): string {
+  return input
+    // OSC sequences: ESC ] ... BEL or ESC \   (e.g. clipboard, window title)
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    // CSI sequences: ESC [ params final-byte
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    // Remaining short escapes (ESC 7, ESC =, ESC ( B leaves a stray char —
+    // best-effort): CSI/OSC were already removed, so ESC is followed by at
+    // most one intermediate/final char here.
+    .replace(/\x1b./g, '')
+    .replace(/\r(?!\n)/g, '') // stray carriage returns from ConPTY redraws
 }
 
 /**
@@ -284,6 +307,16 @@ export interface TaskRunRequest {
   prompt: string
   /** Background runs fire an OS notification on completion (v1.24). */
   background?: boolean
+  /**
+   * Run mode (v1.28.2):
+   *  - 'headless' (default): spawn without a TTY; stream-json parsing for
+   *    claude, positional-prompt argv for others. Fast and structured, but
+   *    only fits CLIs whose headless convention we match.
+   *  - 'pty': EXACTLY like interactive Agent sessions — real ConPTY, prompt
+   *    PASTED into the terminal after startup, captured output (ANSI-
+   *    stripped) becomes the result. Works with any TUI agent.
+   */
+  mode?: 'headless' | 'pty'
 }
 
 /** Live/persisted run descriptor (TASK_IPC.LIST + TaskRunDialog state). */

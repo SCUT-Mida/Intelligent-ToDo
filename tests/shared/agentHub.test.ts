@@ -4,7 +4,8 @@ import {
   sortHistoryEntries,
   pruneHistoryEntries,
   HISTORY_PRUNE_LIMIT,
-  isScheduleDue
+  isScheduleDue,
+  stripAnsiEscape
 } from '../../src/shared/agentHub'
 import type { SessionHistoryEntry, ScheduledTask } from '../../src/shared/agentHub'
 
@@ -38,6 +39,25 @@ describe('pruneHistoryEntries (safety valve, v1.26.3)', () => {
   it('handles the pathological case where pinned alone exceed nothing (all pinned kept)', () => {
     const entries = Array.from({ length: HISTORY_PRUNE_LIMIT + 10 }, (_, i) => mk(i, true))
     expect(pruneHistoryEntries(entries)).toHaveLength(entries.length)
+  })
+})
+
+describe('stripAnsiEscape (pty capture recovery, v1.28.2)', () => {
+  it('strips CSI color/style sequences', () => {
+    expect(stripAnsiEscape('\x1b[91m\x1b[1mError:\x1b[0m boom')).toBe('Error: boom')
+  })
+
+  it('strips OSC sequences (title/clipboard forms)', () => {
+    expect(stripAnsiEscape('\x1b]0;my title\x07ok')).toBe('ok')
+    expect(stripAnsiEscape('\x1b]52;c;YWJj\x1b\\ok')).toBe('ok')
+  })
+
+  it('strips two-char escapes and stray CRs, keeps newlines', () => {
+    expect(stripAnsiEscape('a\x1b7b\rc\nd')).toBe('abc\nd')
+  })
+
+  it('passes plain text through unchanged', () => {
+    expect(stripAnsiEscape('普通中文输出\nsecond line')).toBe('普通中文输出\nsecond line')
   })
 })
 

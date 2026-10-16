@@ -20,7 +20,7 @@ import { effectivePath } from './winEnv'
 import { toolPathDirs } from '../toolPaths'
 
 // node-pty types from @lydell/node-pty
-type IPty = {
+export type IPty = {
   pid: number
   cols: number
   rows: number
@@ -45,7 +45,8 @@ const sessions = new Map<string, PtySession>()
 /** Lazy-load the native module (only available in main process). */
 let ptyModule: { spawn: (file: string, args: string[] | string, options: Record<string, unknown>) => IPty } | undefined
 
-function getPtyModule(): { spawn: (file: string, args: string[] | string, options: Record<string, unknown>) => IPty } {
+/** Exported for the task runner's pty mode (v1.28.2). */
+export function getPtyModule(): { spawn: (file: string, args: string[] | string, options: Record<string, unknown>) => IPty } {
   if (!ptyModule) {
     // Use @lydell/node-pty which ships prebuilt ConPTY binaries for Windows.
     ptyModule = require('@lydell/node-pty') as { spawn: (file: string, args: string[] | string, options: Record<string, unknown>) => IPty }
