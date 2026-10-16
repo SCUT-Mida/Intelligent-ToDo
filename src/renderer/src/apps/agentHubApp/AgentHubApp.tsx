@@ -733,6 +733,36 @@ export default function AgentHubApp(): JSX.Element {
     setSessionTabs((prev) => ({ ...prev, [sessionId]: tab }))
   }, [])
 
+  // ── Re-enter session (v1.29) ──────────────────────────────────────────
+  // Agents load their config/skills/MCP only at startup. "重进" kills the
+  // session's PTY and remounts the terminal (React key bump), so a fresh
+  // agent process starts with the latest configuration.
+  const [terminalEpochs, setTerminalEpochs] = useState<Record<string, number>>({})
+  const [pendingReenterId, setPendingReenterId] = useState<string | null>(null)
+
+  const handleReenterSession = useCallback(async (sessionId: string): Promise<void> => {
+    setPendingReenterId(null)
+    // Refresh the agents list first so the remounted terminal picks up the
+    // latest per-agent args (settings edits are also merged here).
+    try {
+      const fresh = await window.agentHub.listAgents()
+      setAgents(fresh)
+    } catch {
+      // keep stale list — the remount still restarts the agent process
+    }
+    setTerminalEpochs((prev) => ({ ...prev, [sessionId]: (prev[sessionId] ?? 0) + 1 }))
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === sessionId
+          ? { ...s, lastLaunchedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+          : s
+      )
+    )
+    pendingSaveRef.current++
+    setFlash('已重新进入会话：agent 已用最新配置（技能/MCP/参数）重启。')
+    window.setTimeout(() => setFlash(null), 6000)
+  }, [])
+
   // ── Worktree merge / cleanup (v1.27) ──────────────────────────────────
   // Pending action for the ConfirmDialog (set by the panel header buttons).
   const [pendingWorktreeAction, setPendingWorktreeAction] = useState<
@@ -1026,6 +1056,13 @@ export default function AgentHubApp(): JSX.Element {
                             >
                               🔍 诊断
                             </button>
+                            <button
+                              className="btn btn--ghost agent-hub__panel-run"
+                              onClick={() => setPendingReenterId(s.id)}
+                              title="重新进入会话：重启 agent 进程以加载最新的配置 / 技能 / MCP"
+                            >
+                              🔄 重进
+                            </button>
                             {s.worktree && (
                               <>
                                 <button
@@ -1053,6 +1090,7 @@ export default function AgentHubApp(): JSX.Element {
                             style={{ display: tab === 'terminal' ? 'flex' : 'none' }}
                           >
                             <TerminalView
+                              key={`${s.id}:${terminalEpochs[s.id] ?? 0}`}
                               sessionId={s.id}
                               command={agent?.command ?? s.agentId}
                               args={agent?.args}
@@ -1191,6 +1229,25 @@ export default function AgentHubApp(): JSX.Element {
           }}
         />
       )}
+
+      {/* Re-enter session confirmation (v1.29) */}
+      {pendingReenterId && (() => {
+        const session = sessions.find((s) => s.id === pendingReenterId)
+        if (!session) return null
+        const agent = agents.find((a) => a.id === session.agentId)
+        return (
+          <ConfirmDialog
+            title="重新进入会话"
+            message={`将结束当前 agent 进程并以最新配置重新启动（重新加载技能 / MCP / 参数）。\n注意：agent 未完成的输出会丢失，请确认它没有正在执行的任务。`}
+            detail={`${agent?.name ?? session.agentId}\n${session.workDir}`}
+            confirmText="重进"
+            onConfirm={() => {
+              void handleReenterSession(session.id)
+            }}
+            onCancel={() => setPendingReenterId(null)}
+          />
+        )
+      })()}
 
       {/* Worktree merge / cleanup confirmation (v1.27) */}
       {pendingWorktreeAction && (() => {
