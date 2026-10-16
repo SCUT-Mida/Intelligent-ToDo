@@ -104,10 +104,12 @@ export function runTask(sender: WebContents | null, req: TaskRunRequest): TaskRu
 
 // ── pty mode: real ConPTY + paste, any TUI agent (v1.28.2) ──────────────────
 
-/** Delay after spawn before pasting the prompt (agent startup). */
-const PTY_PASTE_DELAY_MS = 5000
+/** Max wait for the agent's first output (startup banner) before pasting. */
+const PTY_PASTE_MAX_WAIT_MS = 15_000
+/** Extra settle time after first output before pasting. */
+const PTY_PASTE_EXTRA_DELAY_MS = 2000
 /** No-output window that ends the turn (agent finished responding). */
-const PTY_IDLE_TIMEOUT_MS = 10 * 60_000
+const PTY_IDLE_TIMEOUT_MS = 3 * 60_000
 /** Hard cap on a pty-mode run. */
 const PTY_MAX_DURATION_MS = 2 * 60 * 60_000
 /** Grace period after the graceful /exit before force-killing. */
@@ -115,6 +117,14 @@ const PTY_EXIT_GRACE_MS = 15_000
 /** ConPTY size for headless-ish pty runs. */
 const PTY_COLS = 160
 const PTY_ROWS = 40
+
+/** Drop pure-decoration lines (banner boxes) from captured TUI text. */
+function stripDecorationLines(text: string): string {
+  return text
+    .split('\n')
+    .filter((l) => !/^[█▀▄▌▐■□─━│═║+*=#\-·\s]*$/.test(l))
+    .join('\n')
+}
 
 function runPtyTask(sender: WebContents | null, req: TaskRunRequest): TaskRunStartResult {
   try {
@@ -158,10 +168,18 @@ function runPtyTask(sender: WebContents | null, req: TaskRunRequest): TaskRunSta
     // Capture + strip ANSI as the stream arrives; the stripped text becomes
     // the run's result. ConPTY redraws cause duplicates — best-effort text.
     let raw = ''
+    let firstOutputSeen = false
+    // Assigned after the timers block below (hoisted via let).
+    let schedulePaste: () => void = (): void => {}
     const dataHandler = (data: string): void => {
       raw += data
       if (raw.length > 400_000) raw = raw.slice(-400_000)
       bumpIdle()
+      if (!firstOutputSeen) {
+        firstOutputSeen = true
+        // The startup banner means the TUI is (probably) ready for input.
+        schedulePaste()
+      }
     }
     pty.onData(dataHandler)
 
@@ -176,11 +194,7 @@ function runPtyTask(sender: WebContents | null, req: TaskRunRequest): TaskRunSta
       run.exitCode = exitCode
       run.endedAt = new Date().toISOString()
 
-      const text = stripAnsiEscape(raw)
-        .split('\n')
-        .map((l) => l.replace(/\s+$/, ''))
-        .filter((l) => l.trim().length > 0)
-        .join('\n')
+      const text = stripDecorationLines(stripAnsiEscape(raw))
       run.resultText = text
       emit(sender, run, 'assistant_message', { text: text.slice(0, 50000) })
       emit(sender, run, run.status === 'cancelled' ? 'run_cancelled' : 'run_finished', {
@@ -192,7 +206,8 @@ function runPtyTask(sender: WebContents | null, req: TaskRunRequest): TaskRunSta
         notifyBus.fire({
           kind: run.status === 'finished' ? 'task-done' : 'info',
           title: run.status === 'finished' ? 'Agent 定时任务完成' : 'Agent 定时任务已取消',
-          body: `${req.command} · ${(text).slice(0, 120).replace(/\s+/g, ' ') || '(无输出)'}`,
+          // Tail is the useful part — TUI banners pollute the head.
+          body: `${req.command} · …${(text).slice(-120).replace(/\s+/g, ' ') || '(无输出)'}`,
           runId: run.runId,
           sessionId: run.sessionId
         })
@@ -204,11 +219,12 @@ function runPtyTask(sender: WebContents | null, req: TaskRunRequest): TaskRunSta
     let idleTimer: NodeJS.Timeout | null = null
     let maxTimer: NodeJS.Timeout | null = null
     let killTimer: NodeJS.Timeout | null = null
+    let pasteTimer: NodeJS.Timeout | null = null
     const clearTimers = (): void => {
-      for (const t of [idleTimer, maxTimer, killTimer]) {
+      for (const t of [idleTimer, maxTimer, killTimer, pasteTimer]) {
         if (t) clearTimeout(t)
       }
-      idleTimer = maxTimer = killTimer = null
+      idleTimer = maxTimer = killTimer = pasteTimer = null
     }
     const bumpIdle = (): void => {
       if (idleTimer) clearTimeout(idleTimer)
@@ -234,15 +250,27 @@ function runPtyTask(sender: WebContents | null, req: TaskRunRequest): TaskRunSta
       settle()
     })
 
-    // Startup → paste the prompt; arm idle + max timers.
-    const pasteTimer = setTimeout(() => {
+    // Paste on first output (+ small settle) or after the max wait — never
+    // blindly at a fixed time, so slow-starting agents don't lose the prompt.
+    const pasteNow = (): void => {
       try {
         pty.write(req.prompt.trim() + '\r')
+        logger.info('agentHub:task', 'prompt pasted', { runId })
         bumpIdle()
       } catch (err) {
         logger.warn('agentHub:task', 'pty paste failed', { runId, error: String(err) })
       }
-    }, PTY_PASTE_DELAY_MS)
+    }
+    schedulePaste = (): void => {
+      if (pasteTimer || settled) return
+      pasteTimer = setTimeout(pasteNow, PTY_PASTE_EXTRA_DELAY_MS)
+      pasteTimer.unref?.()
+    }
+    // Slow-start fallback: paste anyway after the max wait.
+    pasteTimer = setTimeout(() => {
+      pasteTimer = null
+      pasteNow()
+    }, PTY_PASTE_MAX_WAIT_MS)
     pasteTimer.unref?.()
     maxTimer = setTimeout(() => finishTurn('max-duration'), PTY_MAX_DURATION_MS)
     maxTimer.unref?.()

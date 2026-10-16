@@ -112,8 +112,25 @@ export default function ScheduleDialog({ agents, repos, recents, onClose, onRunN
 
   const showLastResult = async (task: ScheduledTask): Promise<void> => {
     try {
-      const events = await window.agentHub.getSessionEvents(scheduleSessionId(task.id))
+      const [events, runs] = await Promise.all([
+        window.agentHub.getSessionEvents(scheduleSessionId(task.id)),
+        window.agentHub.listTasks()
+      ])
+      const running = runs.find(
+        (r) => r.sessionId === scheduleSessionId(task.id) && r.status === 'running'
+      )
       const last = [...events].reverse().find((e) => e.type === 'run_finished' || e.type === 'run_error')
+
+      // Still running: say so with elapsed time instead of "no records" —
+      // pty runs only write run_finished when the turn completes.
+      if (!last && running) {
+        const minutes = Math.max(1, Math.round((Date.now() - new Date(running.startedAt).getTime()) / 60000))
+        setLastResult({
+          id: task.id,
+          text: `⏳ 任务正在运行中（已约 ${minutes} 分钟）。\n交互粘贴模式会在 agent 停止输出后自动结束并通知；完成后再次点击「结果」即可查看输出。`
+        })
+        return
+      }
       const text = last
         ? last.type === 'run_finished'
           ? `${new Date(last.at).toLocaleString('zh-CN', { hour12: false })}\n\n${last.result ?? last.text ?? '（无输出）'}`
